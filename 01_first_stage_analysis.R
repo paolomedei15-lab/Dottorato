@@ -119,16 +119,18 @@ pick_chr <- function(df, patterns) {
 
 ## Convert a reported quantity to the standard unit for its item type.
 ## Unit codes: 1=kg, 2=g, 3=litre, 4=ml, 5=pieces. Anything else -> NA (drop).
+## (We use %in% rather than == so that NA unit codes resolve to FALSE instead
+##  of NA, which would be rejected in subscripted assignment.)
 normalise_qty <- function(qty, unit, type) {
   out <- rep(NA_real_, length(qty))
   if (type == "meat") {                 # standard unit: kg
-    out[unit == 1] <- qty[unit == 1]
-    out[unit == 2] <- qty[unit == 2] / 1000
+    out[unit %in% 1] <- qty[unit %in% 1]
+    out[unit %in% 2] <- qty[unit %in% 2] / 1000
   } else if (type == "litre") {         # standard unit: litre
-    out[unit == 3] <- qty[unit == 3]
-    out[unit == 4] <- qty[unit == 4] / 1000
+    out[unit %in% 3] <- qty[unit %in% 3]
+    out[unit %in% 4] <- qty[unit %in% 4] / 1000
   } else if (type == "pieces") {        # standard unit: pieces
-    out[unit == 5] <- qty[unit == 5]
+    out[unit %in% 5] <- qty[unit %in% 5]
   }
   out
 }

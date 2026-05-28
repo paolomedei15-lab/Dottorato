@@ -1,0 +1,702 @@
+###############################################################################
+##  FOOD CONSUMPTION AND QUALITY UPGRADING IN TANZANIA
+##  First-stage analysis: descriptive statistics + expenditure-elasticity
+##  decomposition (quantity vs. quality) on the Tanzania NPS panel.
+##
+##  Data : NPS Wave 3, Wave 4, Wave 5 household master files (.xlsx).
+##  Author: PhD research script  |  Language: English  |  Style: simple & readable
+##
+##  ------------------------------------------------------------------------
+##  METHOD (literature note)
+##  ------------------------------------------------------------------------
+##  We use the standard unit-value approach for household survey data. For a
+##  food item the budget identity is exact:
+##
+##        expenditure = quantity * unit value
+##   =>   ln(expenditure) = ln(quantity) + ln(unit value)
+##
+##  Estimating three Engel-type log-log regressions on (the log of) the
+##  household welfare measure W gives the decomposition (Deaton, 1988;
+##  Cox & Wohlgenant, 1986; Gibson & Kim, 2019):
+##
+##        eps_expenditure = eps_quantity + eps_quality
+##
+##  Because ln(expenditure) = ln(quantity) + ln(unit value) holds exactly in
+##  the SAME sample with the SAME regressors, OLS guarantees the identity
+##  eps_expenditure = eps_quantity + eps_quality (coefficients add up). The
+##  "quality elasticity" is simply the elasticity of the unit value w.r.t.
+##  total welfare. We test:
+##
+##        H0: eps_quality = 0      vs.   H1: eps_quality > 0
+##
+##  with a one-sided t-test (robust HC1 standard errors).
+##
+##  ------------------------------------------------------------------------
+##  KEY DATA DECISIONS (confirmed before coding)
+##  ------------------------------------------------------------------------
+##  * Items: goat meat (801), beef (802), pork (803), chicken & poultry (804),
+##    eggs (807), fresh milk (901). "Processed milk" is NOT available in these
+##    master files (no canned/processed-milk item exists), so it is dropped.
+##  * Welfare measure & elasticity budget = REAL total monthly expenditure per
+##    ADULT EQUIVALENT (deflated). Quintiles/quartiles/terciles are built on it.
+##  * The three waves are POOLED into one sample, with WAVE FIXED EFFECTS to
+##    absorb price/time differences (we work on deflated/real values).
+##  * Survey weights: WEIGHTED descriptive statistics, UNWEIGHTED regressions.
+##  * Units harmonised so each item is internally consistent:
+##       - meats (goat, beef, pork, chicken): kg  (g -> kg)
+##       - eggs:                                pieces
+##       - fresh milk:                          litres (ml -> litre)
+##    Observations recorded in non-standard units (heap, cup, bottle, ...) are
+##    dropped because they cannot be converted reliably.
+##  * Unit value = purchase expenditure / purchased quantity (the only part of
+##    consumption that carries a market value), in TSH per kg / litre / piece.
+##
+##  NOTE on the master-file layout: each "HH_Data" sheet has TWO header rows
+##  (row 1 = section, row 2 = full variable label). We read with skip = 1 so
+##  the descriptive labels become the column names, then select columns by
+##  matching text patterns (the labels contain the survey codes, e.g.
+##  "itemcode=801]"). Wave 5's main food module uses the "hh_ja..." questions
+##  and splits poultry into Chicken (8041) + Other poultry (8042); we sum them
+##  to reconstruct the combined "chicken & poultry" used in Waves 3 and 4.
+###############################################################################
+
+
+## ============================================================================
+## 0. SETUP
+## ============================================================================
+# install.packages(c("readxl","dplyr","tidyr","stringr","ggplot2",
+#                     "purrr","broom","sandwich","lmtest","scales"))
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(purrr)
+library(ggplot2)
+library(broom)
+library(sandwich)
+library(lmtest)
+library(scales)
+
+## ---- File paths (edit if needed) -------------------------------------------
+y3_path <- "C:/Users/Medei/OneDrive - Food and Agriculture Organization/Desktop/NPS_Y3_Tanzania_HH_Master_UnitValue.xlsx"
+y4_path <- "C:/Users/Medei/OneDrive - Food and Agriculture Organization/Desktop/NPS_Y4_Tanzania_HH_Master.xlsx"
+y5_path <- "C:/Users/Medei/OneDrive - Food and Agriculture Organization/Desktop/NPS_Y5_Tanzania_HH_Master (1).xlsx"
+
+## ---- Output folders --------------------------------------------------------
+out_tab <- "output/tables"
+out_fig <- "output/figures"
+dir.create(out_tab, recursive = TRUE, showWarnings = FALSE)
+dir.create(out_fig, recursive = TRUE, showWarnings = FALSE)
+
+
+## ============================================================================
+## 1. SMALL HELPER FUNCTIONS
+## ============================================================================
+
+## Read one wave's HH_Data sheet. Row 1 = section, row 2 = variable label,
+## data from row 3 -> we skip the first row so row 2 becomes the header.
+read_wave <- function(path) {
+  read_excel(path, sheet = "HH_Data", skip = 1, .name_repair = "minimal")
+}
+
+## Return the FIRST column of `df` whose name contains ALL the given text
+## patterns. Returns a numeric vector (NA if no such column exists).
+pick_num <- function(df, patterns) {
+  hit <- names(df)[map_lgl(names(df),
+                           ~ all(str_detect(.x, fixed(patterns))))]
+  if (length(hit) == 0) return(rep(NA_real_, nrow(df)))
+  suppressWarnings(as.numeric(df[[hit[1]]]))
+}
+
+## Same, but keep the column as character (used for the household id).
+pick_chr <- function(df, patterns) {
+  hit <- names(df)[map_lgl(names(df),
+                           ~ all(str_detect(.x, fixed(patterns))))]
+  if (length(hit) == 0) return(rep(NA_character_, nrow(df)))
+  as.character(df[[hit[1]]])
+}
+
+## Convert a reported quantity to the standard unit for its item type.
+## Unit codes: 1=kg, 2=g, 3=litre, 4=ml, 5=pieces. Anything else -> NA (drop).
+normalise_qty <- function(qty, unit, type) {
+  out <- rep(NA_real_, length(qty))
+  if (type == "meat") {                 # standard unit: kg
+    out[unit == 1] <- qty[unit == 1]
+    out[unit == 2] <- qty[unit == 2] / 1000
+  } else if (type == "litre") {         # standard unit: litre
+    out[unit == 3] <- qty[unit == 3]
+    out[unit == 4] <- qty[unit == 4] / 1000
+  } else if (type == "pieces") {        # standard unit: pieces
+    out[unit == 5] <- qty[unit == 5]
+  }
+  out
+}
+
+## Weighted quantile (used for quintile / quartile / tercile cut-points).
+wtd_quantile <- function(x, w, probs) {
+  ok <- is.finite(x) & is.finite(w) & w > 0
+  x <- x[ok]; w <- w[ok]
+  o <- order(x); x <- x[o]; w <- w[o]
+  cw <- cumsum(w) / sum(w)
+  approx(cw, x, xout = probs, rule = 2, ties = "ordered")$y
+}
+
+## Assign group labels (e.g. Q1..Q5) from weighted cut-points.
+wtd_group <- function(x, w, n, labels) {
+  cuts <- c(-Inf, wtd_quantile(x, w, seq_len(n - 1) / n), Inf)
+  cut(x, breaks = cuts, labels = labels, include.lowest = TRUE)
+}
+
+
+## ============================================================================
+## 2. PER-WAVE CONFIGURATION
+## ============================================================================
+## The three master files are structured slightly differently, so we store the
+## differences in one place. `food_prefix` selects the right food module; the
+## welfare measure is built differently because Wave 5 is already per-AE.
+
+## We match columns on dash-free text tokens so the script is robust to how the
+## file's em-dash ("—") is encoded when read. Each token below is unique within
+## that wave's set of column labels.
+wave_cfg <- list(
+  Y3 = list(path = y3_path, food_prefix = "hh_j",  hhid = "y3_hhid",
+            weight = "y3_weight",
+            welfare_kind = "total"),     # expmR is household-level -> divide by AE
+  Y4 = list(path = y4_path, food_prefix = "hh_j",  hhid = "y4_hhid",
+            weight = "hhweight",
+            welfare_kind = "total"),
+  Y5 = list(path = y5_path, food_prefix = "hh_ja", hhid = "y5_hhid",
+            weight = "y5_crossweight",
+            welfare_kind = "pae")        # expmR_pae is already per adult equiv.
+)
+
+## The six items. For Wave 5 chicken we combine codes 8041 + 8042.
+item_cfg <- tibble::tribble(
+  ~item,         ~label,                 ~type,     ~codes_std,    ~codes_y5,
+  "goat_meat",   "Goat meat",            "meat",    "801",         "801",
+  "beef",        "Beef",                 "meat",    "802",         "802",
+  "pork",        "Pork",                 "meat",    "803",         "803",
+  "chicken",     "Chicken & poultry",    "meat",    "804",         "8041,8042",
+  "eggs",        "Eggs",                 "pieces",  "807",         "807",
+  "fresh_milk",  "Fresh milk",           "litre",   "901",         "901"
+)
+
+
+## ============================================================================
+## 3. EXTRACTION FUNCTIONS
+## ============================================================================
+
+## Household-level variables, harmonised across waves.
+extract_household <- function(df, cfg, wave) {
+  adulteq <- pick_num(df, c("adulteq", "Adult equivalent"))
+  expmR   <- if (cfg$welfare_kind == "pae") {
+    pick_num(df, c("expmR_pae", "per adult equivalent"))
+  } else {
+    pick_num(df, c("expmR", "Real total monthly expenditure (TSH, deflated)"))
+  }
+  # welfare = real total monthly expenditure PER ADULT EQUIVALENT
+  welfare_pae <- if (cfg$welfare_kind == "pae") expmR else expmR / adulteq
+
+  urban_raw <- pick_num(df, c("urban", "Urban/Rural (1=Rural, 2=Urban)"))  # 1=rural,2=urban
+  livestock <- pick_num(df, c("lf02_any_livestock", "owns at least one livestock"))
+
+  tibble(
+    wave        = wave,
+    hhid        = pick_chr(df, cfg$hhid),
+    hhsize      = pick_num(df, c("hh_hhsize", "Household size (total members")),
+    adulteq     = adulteq,
+    weight      = pick_num(df, cfg$weight),
+    region      = pick_num(df, c("region", "Region code")),
+    rural       = as.integer(urban_raw == 1),
+    urban       = as.integer(urban_raw == 2),
+    # Codebook: a missing livestock flag means "no livestock" -> recode NA to 0
+    livestock   = ifelse(is.na(livestock), 0L, as.integer(livestock == 1)),
+    welfare_pae = welfare_pae
+  )
+}
+
+## One item, one wave -> consumed flag, total quantity, purchased quantity,
+## purchase expenditure (all harmonised to the standard unit).
+extract_one_code <- function(df, prefix, code, type) {
+  tag <- paste0("itemcode=", code, "]")
+  yn      <- pick_num(df, c(prefix, tag, "eat/drink any"))
+  q_tot   <- pick_num(df, c(prefix, tag, "in total did your household consume", "QUANTITY"))
+  u_tot   <- pick_num(df, c(prefix, tag, "in total did your household consume", "UNIT"))
+  q_buy   <- pick_num(df, c(prefix, tag, "came from purchases", "QUANTITY"))
+  u_buy   <- pick_num(df, c(prefix, tag, "came from purchases", "UNIT"))
+  spend   <- pick_num(df, c(prefix, tag, "How much did you spend"))
+  tibble(
+    consumed   = as.integer(yn == 1),
+    qty_total  = normalise_qty(q_tot, u_tot, type),
+    qty_purch  = normalise_qty(q_buy, u_buy, type),
+    exp        = spend
+  )
+}
+
+## Combine one or more item codes (codes are summed; this matters only for the
+## Wave-5 chicken = chicken + other poultry case).
+extract_item <- function(df, prefix, codes, type) {
+  parts <- map(codes, ~ extract_one_code(df, prefix, .x, type))
+  reduce(parts, function(a, b) tibble(
+    consumed  = pmax(a$consumed,  b$consumed,  na.rm = TRUE),
+    # sum quantities/expenditure treating NA as 0, but keep NA if both NA
+    qty_total = ifelse(is.na(a$qty_total) & is.na(b$qty_total), NA,
+                       rowSums(cbind(a$qty_total, b$qty_total), na.rm = TRUE)),
+    qty_purch = ifelse(is.na(a$qty_purch) & is.na(b$qty_purch), NA,
+                       rowSums(cbind(a$qty_purch, b$qty_purch), na.rm = TRUE)),
+    exp       = ifelse(is.na(a$exp) & is.na(b$exp), NA,
+                       rowSums(cbind(a$exp, b$exp), na.rm = TRUE))
+  ))
+}
+
+
+## ============================================================================
+## 4. BUILD THE POOLED LONG DATASET
+## ============================================================================
+
+hh_list   <- list()   # household-level, one row per household
+item_list <- list()   # long: one row per household x item
+
+for (wave in names(wave_cfg)) {
+  cfg <- wave_cfg[[wave]]
+  message("Reading wave ", wave, " ...")
+  df  <- read_wave(cfg$path)
+
+  hh  <- extract_household(df, cfg, wave)
+  hh_list[[wave]] <- hh
+
+  for (i in seq_len(nrow(item_cfg))) {
+    it    <- item_cfg[i, ]
+    codes <- str_split(if (wave == "Y5") it$codes_y5 else it$codes_std, ",")[[1]]
+    ext   <- extract_item(df, cfg$food_prefix, codes, it$type)
+    ext$item <- it$item
+    ext$hhid <- hh$hhid
+    ext$wave <- wave
+    item_list[[paste(wave, it$item)]] <- ext
+  }
+}
+
+household <- bind_rows(hh_list)
+
+## Long item table joined with household characteristics.
+items <- bind_rows(item_list) %>%
+  left_join(household, by = c("wave", "hhid")) %>%
+  mutate(
+    # unit value = purchase expenditure / purchased quantity (TSH per std unit)
+    unit_value     = ifelse(qty_purch > 0 & exp > 0, exp / qty_purch, NA_real_),
+    qty_total_pae  = qty_total / adulteq,   # quantity per adult equivalent
+    exp_pae        = exp / adulteq,         # expenditure per adult equivalent
+    item_label     = item_cfg$label[match(item, item_cfg$item)]
+  )
+
+## Order item labels nicely for all tables/plots.
+item_levels <- item_cfg$label
+items$item_label <- factor(items$item_label, levels = item_levels)
+
+message("Households pooled: ", nrow(household),
+        " | item-rows: ", nrow(items))
+
+
+## ============================================================================
+## 5. DESCRIPTIVE STATISTICS  (weighted)
+## ============================================================================
+
+## ---- 5a. Household-level summary -------------------------------------------
+## Household size, adult equivalents, rural/urban shares, livestock ownership.
+hh_summary <- household %>%
+  group_by(wave) %>%
+  summarise(
+    n_households   = n(),
+    mean_hhsize    = weighted.mean(hhsize,    weight, na.rm = TRUE),
+    mean_adulteq   = weighted.mean(adulteq,   weight, na.rm = TRUE),
+    pct_rural      = 100 * weighted.mean(rural,     weight, na.rm = TRUE),
+    pct_urban      = 100 * weighted.mean(urban,     weight, na.rm = TRUE),
+    pct_livestock  = 100 * weighted.mean(livestock, weight, na.rm = TRUE),
+    mean_welfare_pae = weighted.mean(welfare_pae, weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+hh_summary_pooled <- household %>%
+  summarise(
+    wave = "Pooled",
+    n_households   = n(),
+    mean_hhsize    = weighted.mean(hhsize,    weight, na.rm = TRUE),
+    mean_adulteq   = weighted.mean(adulteq,   weight, na.rm = TRUE),
+    pct_rural      = 100 * weighted.mean(rural,     weight, na.rm = TRUE),
+    pct_urban      = 100 * weighted.mean(urban,     weight, na.rm = TRUE),
+    pct_livestock  = 100 * weighted.mean(livestock, weight, na.rm = TRUE),
+    mean_welfare_pae = weighted.mean(welfare_pae, weight, na.rm = TRUE)
+  )
+
+hh_summary <- bind_rows(hh_summary, hh_summary_pooled)
+write.csv(hh_summary, file.path(out_tab, "01_household_summary.csv"), row.names = FALSE)
+print(hh_summary)
+
+## ---- 5b. Item-level summary (HOUSEHOLD vs ADULT-EQUIVALENT) ------------------
+## Means are computed over CONSUMERS (households that actually consumed the item)
+## so that quantities and unit values are economically meaningful.
+item_summary <- items %>%
+  group_by(item_label) %>%
+  summarise(
+    pct_consuming      = 100 * weighted.mean(consumed, weight, na.rm = TRUE),
+    # household level
+    mean_qty_hh        = weighted.mean(ifelse(qty_total > 0, qty_total, NA), weight, na.rm = TRUE),
+    mean_exp_hh        = weighted.mean(ifelse(exp > 0, exp, NA),             weight, na.rm = TRUE),
+    # adult-equivalent level  (the key requested measure)
+    mean_qty_pae       = weighted.mean(ifelse(qty_total > 0, qty_total_pae, NA), weight, na.rm = TRUE),
+    mean_exp_pae       = weighted.mean(ifelse(exp > 0, exp_pae, NA),             weight, na.rm = TRUE),
+    # unit value (TSH per kg / litre / piece)
+    mean_unit_value    = weighted.mean(unit_value, weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+write.csv(item_summary, file.path(out_tab, "02_item_summary.csv"), row.names = FALSE)
+print(item_summary)
+
+
+## ============================================================================
+## 6. WELFARE GROUPS: QUINTILES, QUARTILES, TERCILES
+## ============================================================================
+## Built on REAL expenditure per adult equivalent, using survey weights for the
+## cut-points.
+##
+## IMPORTANT: the real per-AE aggregates are NOT comparable in LEVEL across
+## waves (Waves 3-4 average ~1.1-1.2M, Wave 5 ~0.13M: the prepared files use a
+## different deflator base / reference period). We therefore build the groups
+## WITHIN each wave and then pool the labels, so "Q5" always means the richest
+## 20% of that wave. (The elasticity regressions in Section 9 instead pool the
+## waves and rely on wave fixed effects, which absorb this level difference and
+## identify the slope from within-wave variation.)
+
+household <- household %>%
+  group_by(wave) %>%
+  mutate(
+    quintile = wtd_group(welfare_pae, weight, 5, paste0("Q", 1:5)),
+    quartile = wtd_group(welfare_pae, weight, 4, paste0("Qt", 1:4)),
+    tercile  = wtd_group(welfare_pae, weight, 3, paste0("T", 1:3))
+  ) %>%
+  ungroup()
+
+## Re-attach the group labels to the long item table.
+items <- items %>%
+  select(-any_of(c("quintile", "quartile", "tercile"))) %>%
+  left_join(household %>% select(wave, hhid, quintile, quartile, tercile),
+            by = c("wave", "hhid"))
+
+## Generic helper: weighted item means by a grouping variable, optionally
+## restricted to rural or urban households.
+group_means <- function(data, group_var, area = c("all", "rural", "urban")) {
+  area <- match.arg(area)
+  d <- data
+  if (area == "rural") d <- filter(d, rural == 1)
+  if (area == "urban") d <- filter(d, urban == 1)
+  d %>%
+    filter(!is.na(.data[[group_var]])) %>%
+    group_by(item_label, group = .data[[group_var]]) %>%
+    summarise(
+      qty_pae    = weighted.mean(ifelse(qty_total > 0, qty_total_pae, NA), weight, na.rm = TRUE),
+      exp_pae    = weighted.mean(ifelse(exp > 0, exp_pae, NA),             weight, na.rm = TRUE),
+      unit_value = weighted.mean(unit_value, weight, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(grouping = group_var, area = area)
+}
+
+## Compute every combination: {quintile,quartile,tercile} x {all,rural,urban}.
+combos <- expand.grid(
+  gv   = c("quintile", "quartile", "tercile"),
+  area = c("all", "rural", "urban"),
+  stringsAsFactors = FALSE
+)
+group_tables <- pmap_dfr(combos, function(gv, area) group_means(items, gv, area))
+
+write.csv(group_tables, file.path(out_tab, "03_group_means.csv"), row.names = FALSE)
+
+
+## ============================================================================
+## 7. Q5 / Q1 RATIOS  (quantity, expenditure, unit value)
+## ============================================================================
+## How much more do the richest 20% consume / spend / pay-per-unit relative to
+## the poorest 20% ? Computed for All / Rural / Urban.
+
+q5q1_ratios <- group_tables %>%
+  filter(grouping == "quintile", group %in% c("Q1", "Q5")) %>%
+  pivot_wider(id_cols = c(item_label, area), names_from = group,
+              values_from = c(qty_pae, exp_pae, unit_value)) %>%
+  mutate(
+    qty_ratio_Q5_Q1  = qty_pae_Q5    / qty_pae_Q1,
+    exp_ratio_Q5_Q1  = exp_pae_Q5    / exp_pae_Q1,
+    uv_ratio_Q5_Q1   = unit_value_Q5 / unit_value_Q1
+  ) %>%
+  select(item_label, area, qty_ratio_Q5_Q1, exp_ratio_Q5_Q1, uv_ratio_Q5_Q1)
+
+write.csv(q5q1_ratios, file.path(out_tab, "04_Q5_Q1_ratios.csv"), row.names = FALSE)
+print(q5q1_ratios)
+
+
+## ============================================================================
+## 8. GRAPHS
+## ============================================================================
+theme_set(theme_minimal(base_size = 11))
+
+## ---- 8a. Q5/Q1 ratios (all households): qty vs exp vs unit value -----------
+ratio_long <- q5q1_ratios %>%
+  filter(area == "all") %>%
+  pivot_longer(c(qty_ratio_Q5_Q1, exp_ratio_Q5_Q1, uv_ratio_Q5_Q1),
+               names_to = "measure", values_to = "ratio") %>%
+  mutate(measure = recode(measure,
+                          qty_ratio_Q5_Q1 = "Quantity",
+                          exp_ratio_Q5_Q1 = "Expenditure",
+                          uv_ratio_Q5_Q1  = "Unit value"))
+
+g_ratio <- ggplot(ratio_long, aes(item_label, ratio, fill = measure)) +
+  geom_col(position = position_dodge()) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(title = "Q5 / Q1 ratios by item (pooled, all households)",
+       subtitle = "Ratio of richest-quintile to poorest-quintile averages (per adult equivalent)",
+       x = NULL, y = "Q5 / Q1 ratio", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig1_Q5Q1_ratios.png"), g_ratio, width = 9, height = 5, dpi = 150)
+
+## ---- 8b. Unit value across quintiles (the "quality gradient") --------------
+uv_by_q <- group_tables %>% filter(grouping == "quintile", area == "all")
+g_uv <- ggplot(uv_by_q, aes(group, unit_value, group = item_label, colour = item_label)) +
+  geom_line() + geom_point() +
+  labs(title = "Unit value by welfare quintile (quality gradient)",
+       x = "Welfare quintile (real expenditure per adult equivalent)",
+       y = "Unit value (TSH per kg / litre / piece)", colour = NULL)
+ggsave(file.path(out_fig, "fig2_unitvalue_quintiles.png"), g_uv, width = 9, height = 5, dpi = 150)
+
+## ---- 8c. Rural vs urban comparison -----------------------------------------
+rural_urban <- group_tables %>%
+  filter(grouping == "quintile", area %in% c("rural", "urban")) %>%
+  group_by(item_label, area) %>%
+  summarise(unit_value = mean(unit_value, na.rm = TRUE),
+            exp_pae    = mean(exp_pae,    na.rm = TRUE), .groups = "drop")
+
+g_ru <- ggplot(rural_urban, aes(item_label, unit_value, fill = area)) +
+  geom_col(position = position_dodge()) +
+  labs(title = "Rural vs urban: average unit value by item",
+       x = NULL, y = "Unit value (TSH per std unit)", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig3_rural_urban_unitvalue.png"), g_ru, width = 9, height = 5, dpi = 150)
+
+
+## ============================================================================
+## 9. ELASTICITY ESTIMATION AND THE QUALITY-UPGRADING TEST
+## ============================================================================
+## We use the PURCHASED part of consumption (the only part with a market value)
+## so that ln(exp) = ln(qty) + ln(unit value) holds exactly.
+##
+##   ln(exp)        ~ ln(welfare_pae) + controls   -> eps_expenditure
+##   ln(qty_purch)  ~ ln(welfare_pae) + controls   -> eps_quantity
+##   ln(unit_value) ~ ln(welfare_pae) + controls   -> eps_quality
+##
+## Controls: log adult equivalents, rural dummy, region, and WAVE dummies
+## (pooled estimation with wave fixed effects). Welfare is real per-AE
+## expenditure, so wave dummies absorb the remaining price/level differences.
+
+est <- items %>%
+  filter(qty_purch > 0, exp > 0, is.finite(unit_value),
+         welfare_pae > 0, adulteq > 0) %>%
+  mutate(
+    ln_exp = log(exp),
+    ln_q   = log(qty_purch),
+    ln_uv  = log(unit_value),
+    ln_w   = log(welfare_pae),
+    ln_ae  = log(adulteq),
+    rural  = factor(rural),
+    wave   = factor(wave),
+    region = factor(region)
+  )
+
+## One-sided test of H1: eps_quality > 0, with robust (HC1) standard errors.
+one_sided_quality_test <- function(model) {
+  ct  <- coeftest(model, vcov = vcovHC(model, type = "HC1"))
+  b   <- ct["ln_w", "Estimate"]
+  se  <- ct["ln_w", "Std. Error"]
+  tval <- b / se
+  p_one <- pt(tval, df = df.residual(model), lower.tail = FALSE)  # H1: > 0
+  c(estimate = b, se = se, t = tval, p_one_sided = p_one)
+}
+
+## Fit the three regressions for one item and return the decomposition.
+estimate_item <- function(d) {
+  ctrl <- "ln_w + ln_ae + rural + wave + region"
+  m_exp <- lm(as.formula(paste("ln_exp ~", ctrl)), data = d)
+  m_q   <- lm(as.formula(paste("ln_q   ~", ctrl)), data = d)
+  m_uv  <- lm(as.formula(paste("ln_uv  ~", ctrl)), data = d)
+
+  rob <- function(m) coeftest(m, vcov = vcovHC(m, type = "HC1"))["ln_w", "Estimate"]
+  qtest <- one_sided_quality_test(m_uv)
+
+  tibble(
+    n              = nrow(d),
+    eps_expenditure = rob(m_exp),
+    eps_quantity    = rob(m_q),
+    eps_quality     = qtest["estimate"],
+    quality_se      = qtest["se"],
+    quality_t       = qtest["t"],
+    quality_p_1side = qtest["p_one_sided"],
+    reject_H0_5pct  = qtest["p_one_sided"] < 0.05
+  )
+}
+
+## Per-item results.
+elasticities <- est %>%
+  group_by(item_label) %>%
+  group_modify(~ estimate_item(.x)) %>%
+  ungroup()
+
+## Pooled across ALL items (item fixed effects + wave fixed effects):
+## a single "overall" set of elasticities for animal-source foods.
+est_pooled <- est %>% mutate(item = factor(item))
+m_exp_p <- lm(ln_exp ~ ln_w + ln_ae + rural + wave + region + item, data = est_pooled)
+m_q_p   <- lm(ln_q   ~ ln_w + ln_ae + rural + wave + region + item, data = est_pooled)
+m_uv_p  <- lm(ln_uv  ~ ln_w + ln_ae + rural + wave + region + item, data = est_pooled)
+rob_coef <- function(m) coeftest(m, vcov = vcovHC(m, type = "HC1"))["ln_w", "Estimate"]
+qtest_p  <- one_sided_quality_test(m_uv_p)
+
+pooled_row <- tibble(
+  item_label      = "ALL ITEMS (pooled)",
+  n               = nrow(est_pooled),
+  eps_expenditure = rob_coef(m_exp_p),
+  eps_quantity    = rob_coef(m_q_p),
+  eps_quality     = qtest_p["estimate"],
+  quality_se      = qtest_p["se"],
+  quality_t       = qtest_p["t"],
+  quality_p_1side = qtest_p["p_one_sided"],
+  reject_H0_5pct  = qtest_p["p_one_sided"] < 0.05
+)
+
+elasticities <- bind_rows(elasticities, pooled_row)
+write.csv(elasticities, file.path(out_tab, "05_elasticities.csv"), row.names = FALSE)
+cat("\n==== Elasticity decomposition (eps_expenditure = eps_quantity + eps_quality) ====\n")
+print(as.data.frame(elasticities), digits = 3)
+
+
+## ---- 9b. Elasticity decomposition graph ------------------------------------
+elas_long <- elasticities %>%
+  filter(item_label != "ALL ITEMS (pooled)") %>%
+  select(item_label, eps_quantity, eps_quality) %>%
+  pivot_longer(c(eps_quantity, eps_quality),
+               names_to = "component", values_to = "elasticity") %>%
+  mutate(component = recode(component,
+                            eps_quantity = "Quantity",
+                            eps_quality  = "Quality"))
+
+g_elas <- ggplot(elas_long, aes(item_label, elasticity, fill = component)) +
+  geom_col() +
+  labs(title = "Expenditure elasticity decomposition by item",
+       subtitle = "Total height = expenditure elasticity; split into quantity and quality",
+       x = NULL, y = "Elasticity w.r.t. real expenditure per AE", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig4_elasticity_decomposition.png"), g_elas, width = 9, height = 5, dpi = 150)
+
+
+## ============================================================================
+## 10. AT WHICH INCOME LEVEL DOES QUALITY START TO MATTER?
+## ============================================================================
+## Two complementary answers.
+##
+## (A) Quality elasticity BY WELFARE QUINTILE: re-estimate the unit-value
+##     equation allowing a separate ln_w slope per quintile. The first quintile
+##     whose quality elasticity is significantly positive marks the income
+##     range where quality upgrading "switches on". We report the average real
+##     expenditure per AE of that quintile as the threshold income.
+##
+## (B) A continuous turning point from a QUADRATIC unit-value Engel curve:
+##         ln_uv = a + b1*ln_w + b2*ln_w^2 + controls
+##     local quality elasticity = b1 + 2*b2*ln_w; setting it to zero gives
+##         ln_w* = -b1 / (2*b2)   ->   W* = exp(ln_w*)
+##     (meaningful as a "quality switches on" point when b2 > 0).
+
+## ---- (A) By-quintile quality elasticity (pooled across items) --------------
+est_q <- est_pooled %>% filter(!is.na(quintile)) %>% mutate(quintile = factor(quintile))
+m_uv_byq <- lm(ln_uv ~ quintile + quintile:ln_w + ln_ae + rural + wave + region + item,
+               data = est_q)
+ctq <- coeftest(m_uv_byq, vcov = vcovHC(m_uv_byq, type = "HC1"))
+
+# pull the quintile-specific ln_w slopes
+slope_rows <- grep("ln_w", rownames(ctq), value = TRUE)
+quality_by_quintile <- tibble(
+  quintile    = str_extract(slope_rows, "Q[1-5]"),
+  eps_quality = ctq[slope_rows, "Estimate"],
+  se          = ctq[slope_rows, "Std. Error"],
+  t           = ctq[slope_rows, "Estimate"] / ctq[slope_rows, "Std. Error"]
+) %>%
+  mutate(p_one_sided = pt(t, df = df.residual(m_uv_byq), lower.tail = FALSE),
+         positive_sig = p_one_sided < 0.05) %>%
+  arrange(quintile)
+
+write.csv(quality_by_quintile, file.path(out_tab, "06_quality_by_quintile.csv"), row.names = FALSE)
+cat("\n==== Quality elasticity by welfare quintile (within-wave quintiles) ====\n")
+print(as.data.frame(quality_by_quintile), digits = 3)
+
+first_pos <- quality_by_quintile %>% filter(positive_sig) %>% slice(1)
+if (nrow(first_pos) > 0)
+  cat(sprintf("\nQuality upgrading becomes significant from quintile %s upward.\n",
+              first_pos$quintile))
+
+## Monetary interpretation: because welfare levels differ across waves, we give
+## the mean real expenditure per AE of each quintile SEPARATELY by wave.
+q_income_by_wave <- household %>%
+  filter(!is.na(quintile)) %>%
+  group_by(wave, quintile) %>%
+  summarise(mean_welfare_pae = weighted.mean(welfare_pae, weight, na.rm = TRUE),
+            .groups = "drop")
+write.csv(q_income_by_wave, file.path(out_tab, "07_quintile_income_by_wave.csv"), row.names = FALSE)
+cat("\nMean real expenditure per AE by quintile and wave (units differ across waves):\n")
+print(as.data.frame(q_income_by_wave), digits = 6)
+
+## ---- (B) Threshold income tied to the by-quintile test ---------------------
+## The first quintile with a significantly positive quality elasticity marks the
+## income range where quality upgrading switches on. We report the income (real
+## expenditure per AE) at the LOWER boundary of that quintile, separately by wave
+## (welfare levels are wave-specific).
+##
+## NOTE: a continuous quadratic-Engel-curve turning point (W* = exp(-b1/2b2))
+## was tested but is unstable here -- it is driven by curvature outside the data
+## range and returns implausible values. The quantile-based threshold below is
+## robust and directly interpretable, so we use it instead.
+if (nrow(first_pos) > 0) {
+  k <- as.integer(str_extract(first_pos$quintile, "[0-9]"))   # e.g. "Q2" -> 2
+  prob_lower <- (k - 1) / 5                                   # lower bound of that quintile
+  thresholds <- household %>%
+    filter(!is.na(welfare_pae)) %>%
+    group_by(wave) %>%
+    summarise(threshold_welfare_pae = wtd_quantile(welfare_pae, weight, prob_lower),
+              .groups = "drop") %>%
+    mutate(first_significant_quintile = first_pos$quintile)
+  write.csv(thresholds, file.path(out_tab, "08_quality_threshold_income.csv"), row.names = FALSE)
+  cat(sprintf("\n==== Income at which quality starts to matter (from quintile %s) ====\n",
+              first_pos$quintile))
+  cat("Threshold = real expenditure per AE at the lower edge of that quintile, by wave:\n")
+  print(as.data.frame(thresholds), digits = 6)
+}
+
+## ---- Graph: quality elasticity across quintiles ----------------------------
+g_q <- ggplot(quality_by_quintile, aes(quintile, eps_quality)) +
+  geom_col(aes(fill = positive_sig)) +
+  geom_errorbar(aes(ymin = eps_quality - 1.96 * se,
+                    ymax = eps_quality + 1.96 * se), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c(`TRUE` = "steelblue", `FALSE` = "grey70"),
+                    name = "Quality elasticity\nsignificant (> 0)") +
+  labs(title = "Quality elasticity by welfare quintile",
+       subtitle = "When does quality upgrading switch on as income rises?",
+       x = "Welfare quintile (real expenditure per adult equivalent)",
+       y = "Quality elasticity (eps_quality)")
+ggsave(file.path(out_fig, "fig5_quality_by_quintile.png"), g_q, width = 8, height = 5, dpi = 150)
+
+
+## ============================================================================
+## 11. DONE
+## ============================================================================
+cat("\nAll tables saved to:", normalizePath(out_tab), "\n")
+cat("All figures saved to:", normalizePath(out_fig), "\n")
+cat("\nNotes:\n")
+cat(" * 'Processed milk' is not available in these master files; the analysis\n")
+cat("   covers goat meat, beef, pork, chicken & poultry, eggs, and fresh milk.\n")
+cat(" * Real expenditure per AE is not level-comparable across waves, so welfare\n")
+cat("   groups are built WITHIN wave and elasticities use wave fixed effects.\n")

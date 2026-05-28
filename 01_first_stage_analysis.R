@@ -150,6 +150,27 @@ wtd_group <- function(x, w, n, labels) {
   cut(x, breaks = cuts, labels = labels, include.lowest = TRUE)
 }
 
+## Robust weighted mean / median. Base R's weighted.mean(na.rm=TRUE) drops NA in
+## x but NOT in the weights, so a single NA weight returns NA. These versions
+## drop any row with NA x, NA weight, or non-positive weight.
+wmean <- function(x, w) {
+  ok <- is.finite(x) & is.finite(w) & w > 0
+  if (!any(ok)) return(NA_real_)
+  sum(x[ok] * w[ok]) / sum(w[ok])
+}
+wmedian <- function(x, w) {
+  ok <- is.finite(x) & is.finite(w) & w > 0
+  if (!any(ok)) return(NA_real_)
+  wtd_quantile(x[ok], w[ok], 0.5)
+}
+
+## Set values outside the [lo, hi] percentile range to NA (used within each
+## item x wave to remove data-entry outliers, e.g. beef at 10,000,000 TSH/kg).
+trim_to_na <- function(x, lo = 0.01, hi = 0.99) {
+  qs <- quantile(x, c(lo, hi), na.rm = TRUE, names = FALSE)
+  ifelse(is.finite(x) & x >= qs[1] & x <= qs[2], x, NA_real_)
+}
+
 
 ## ============================================================================
 ## 2. PER-WAVE CONFIGURATION
@@ -286,10 +307,22 @@ items <- bind_rows(item_list) %>%
   left_join(household, by = c("wave", "hhid")) %>%
   mutate(
     # unit value = purchase expenditure / purchased quantity (TSH per std unit)
-    unit_value     = ifelse(qty_purch > 0 & exp > 0, exp / qty_purch, NA_real_),
-    qty_total_pae  = qty_total / adulteq,   # quantity per adult equivalent
-    exp_pae        = exp / adulteq,         # expenditure per adult equivalent
-    item_label     = item_cfg$label[match(item, item_cfg$item)]
+    unit_value = ifelse(qty_purch > 0 & exp > 0, exp / qty_purch, NA_real_)
+  )
+
+## ---- Remove extreme outliers (data-entry errors) ---------------------------
+## Within each item x wave, trim unit value, quantities and expenditure to their
+## 1st-99th percentile range so descriptive means/ratios and the regressions are
+## not driven by errors. (Diagnostic: beef unit value had a max of 10,000,000
+## TSH/kg vs a median of ~6,000.)
+items <- items %>%
+  group_by(item, wave) %>%
+  mutate(across(c(unit_value, qty_total, qty_purch, exp), trim_to_na)) %>%
+  ungroup() %>%
+  mutate(
+    qty_total_pae = qty_total / adulteq,   # quantity per adult equivalent
+    exp_pae       = exp / adulteq,         # expenditure per adult equivalent
+    item_label    = item_cfg$label[match(item, item_cfg$item)]
   )
 
 ## Order item labels nicely for all tables/plots.
@@ -310,12 +343,12 @@ hh_summary <- household %>%
   group_by(wave) %>%
   summarise(
     n_households   = n(),
-    mean_hhsize    = weighted.mean(hhsize,    weight, na.rm = TRUE),
-    mean_adulteq   = weighted.mean(adulteq,   weight, na.rm = TRUE),
-    pct_rural      = 100 * weighted.mean(rural,     weight, na.rm = TRUE),
-    pct_urban      = 100 * weighted.mean(urban,     weight, na.rm = TRUE),
-    pct_livestock  = 100 * weighted.mean(livestock, weight, na.rm = TRUE),
-    mean_welfare_pae = weighted.mean(welfare_pae, weight, na.rm = TRUE),
+    mean_hhsize    = wmean(hhsize,    weight),
+    mean_adulteq   = wmean(adulteq,   weight),
+    pct_rural      = 100 * wmean(rural,     weight),
+    pct_urban      = 100 * wmean(urban,     weight),
+    pct_livestock  = 100 * wmean(livestock, weight),
+    mean_welfare_pae = wmean(welfare_pae, weight),
     .groups = "drop"
   )
 
@@ -323,12 +356,12 @@ hh_summary_pooled <- household %>%
   summarise(
     wave = "Pooled",
     n_households   = n(),
-    mean_hhsize    = weighted.mean(hhsize,    weight, na.rm = TRUE),
-    mean_adulteq   = weighted.mean(adulteq,   weight, na.rm = TRUE),
-    pct_rural      = 100 * weighted.mean(rural,     weight, na.rm = TRUE),
-    pct_urban      = 100 * weighted.mean(urban,     weight, na.rm = TRUE),
-    pct_livestock  = 100 * weighted.mean(livestock, weight, na.rm = TRUE),
-    mean_welfare_pae = weighted.mean(welfare_pae, weight, na.rm = TRUE)
+    mean_hhsize    = wmean(hhsize,    weight),
+    mean_adulteq   = wmean(adulteq,   weight),
+    pct_rural      = 100 * wmean(rural,     weight),
+    pct_urban      = 100 * wmean(urban,     weight),
+    pct_livestock  = 100 * wmean(livestock, weight),
+    mean_welfare_pae = wmean(welfare_pae, weight)
   )
 
 hh_summary <- bind_rows(hh_summary, hh_summary_pooled)
@@ -341,15 +374,15 @@ print(hh_summary)
 item_summary <- items %>%
   group_by(item_label) %>%
   summarise(
-    pct_consuming      = 100 * weighted.mean(consumed, weight, na.rm = TRUE),
+    pct_consuming      = 100 * wmean(consumed, weight),
     # household level
-    mean_qty_hh        = weighted.mean(ifelse(qty_total > 0, qty_total, NA), weight, na.rm = TRUE),
-    mean_exp_hh        = weighted.mean(ifelse(exp > 0, exp, NA),             weight, na.rm = TRUE),
+    mean_qty_hh        = wmean(ifelse(qty_total > 0, qty_total, NA), weight),
+    mean_exp_hh        = wmean(ifelse(exp > 0, exp, NA),             weight),
     # adult-equivalent level  (the key requested measure)
-    mean_qty_pae       = weighted.mean(ifelse(qty_total > 0, qty_total_pae, NA), weight, na.rm = TRUE),
-    mean_exp_pae       = weighted.mean(ifelse(exp > 0, exp_pae, NA),             weight, na.rm = TRUE),
-    # unit value (TSH per kg / litre / piece)
-    mean_unit_value    = weighted.mean(unit_value, weight, na.rm = TRUE),
+    mean_qty_pae       = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight),
+    mean_exp_pae       = wmean(ifelse(exp > 0, exp_pae, NA),             weight),
+    # unit value: MEDIAN (robust to skew/outliers), TSH per kg / litre / piece
+    median_unit_value  = wmedian(unit_value, weight),
     .groups = "drop"
   )
 write.csv(item_summary, file.path(out_tab, "02_item_summary.csv"), row.names = FALSE)
@@ -396,9 +429,9 @@ group_means <- function(data, group_var, area = c("all", "rural", "urban")) {
     filter(!is.na(.data[[group_var]])) %>%
     group_by(item_label, group = .data[[group_var]]) %>%
     summarise(
-      qty_pae    = weighted.mean(ifelse(qty_total > 0, qty_total_pae, NA), weight, na.rm = TRUE),
-      exp_pae    = weighted.mean(ifelse(exp > 0, exp_pae, NA),             weight, na.rm = TRUE),
-      unit_value = weighted.mean(unit_value, weight, na.rm = TRUE),
+      qty_pae    = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight),
+      exp_pae    = wmean(ifelse(exp > 0, exp_pae, NA),             weight),
+      unit_value = wmedian(unit_value, weight),   # median: robust price measure
       .groups = "drop"
     ) %>%
     mutate(grouping = group_var, area = area)
@@ -645,7 +678,7 @@ if (nrow(first_pos) > 0)
 q_income_by_wave <- household %>%
   filter(!is.na(quintile)) %>%
   group_by(wave, quintile) %>%
-  summarise(mean_welfare_pae = weighted.mean(welfare_pae, weight, na.rm = TRUE),
+  summarise(mean_welfare_pae = wmean(welfare_pae, weight),
             .groups = "drop")
 write.csv(q_income_by_wave, file.path(out_tab, "07_quintile_income_by_wave.csv"), row.names = FALSE)
 cat("\nMean real expenditure per AE by quintile and wave (units differ across waves):\n")

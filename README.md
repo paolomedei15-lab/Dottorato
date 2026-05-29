@@ -98,6 +98,22 @@ See `FINAL_REPORT.md` for the full write-up and the robustness checks.
 13. `fig13_quality_gradient` – log unit value vs log welfare by item (quality slope)
 14. `fig14_unitvalue_groups` – unit-value gradient across quintiles, quartiles, terciles
 15. `fig15_quality_forest` – quality elasticity by item with 95% CI (hypothesis test)
+16. `fig16_quantity_source` – consumed quantity by source (purchased / own / gifts)
+17. `fig17_source_by_livestock` – quantity source split by livestock ownership
+18. `fig18_expenditure_by_livestock` – expenditure per AE by livestock ownership
+19. `fig19_quality_share` – quality's share of the expenditure elasticity by group
+20. `fig20_unitvalue_rural_urban` – unit-value gradient, rural vs urban (within-area quintiles)
+
+## Final report (generated in R)
+
+`02_report.Rmd` knits a self-contained HTML report from the saved tables and
+figures. After running the analysis script:
+
+```r
+rmarkdown::render("02_report.Rmd")   # produces 02_report.html
+```
+
+`FINAL_REPORT.md` is the static written version with the robustness discussion.
 
 ## How to run
 

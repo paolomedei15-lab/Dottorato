@@ -239,8 +239,8 @@ extract_household <- function(df, cfg, wave) {
   )
 }
 
-## One item, one wave -> consumed flag, total quantity, purchased quantity,
-## purchase expenditure (all harmonised to the standard unit).
+## One item, one wave -> consumed flag, total quantity, and the quantity by
+## source (purchased / own production / gifts), plus purchase expenditure.
 extract_one_code <- function(df, prefix, code, type) {
   tag <- paste0("itemcode=", code, "]")
   yn      <- pick_num(df, c(prefix, tag, "eat/drink any"))
@@ -248,11 +248,17 @@ extract_one_code <- function(df, prefix, code, type) {
   u_tot   <- pick_num(df, c(prefix, tag, "in total did your household consume", "UNIT"))
   q_buy   <- pick_num(df, c(prefix, tag, "came from purchases", "QUANTITY"))
   u_buy   <- pick_num(df, c(prefix, tag, "came from purchases", "UNIT"))
+  q_own   <- pick_num(df, c(prefix, tag, "came from own production", "QUANTITY"))
+  u_own   <- pick_num(df, c(prefix, tag, "came from own production", "UNIT"))
+  q_gift  <- pick_num(df, c(prefix, tag, "came from gifts", "QUANTITY"))
+  u_gift  <- pick_num(df, c(prefix, tag, "came from gifts", "UNIT"))
   spend   <- pick_num(df, c(prefix, tag, "How much did you spend"))
   tibble(
     consumed   = as.integer(yn == 1),
-    qty_total  = normalise_qty(q_tot, u_tot, type),
-    qty_purch  = normalise_qty(q_buy, u_buy, type),
+    qty_total  = normalise_qty(q_tot,  u_tot,  type),
+    qty_purch  = normalise_qty(q_buy,  u_buy,  type),
+    qty_own    = normalise_qty(q_own,  u_own,  type),
+    qty_gift   = normalise_qty(q_gift, u_gift, type),
     exp        = spend
   )
 }
@@ -261,15 +267,15 @@ extract_one_code <- function(df, prefix, code, type) {
 ## Wave-5 chicken = chicken + other poultry case).
 extract_item <- function(df, prefix, codes, type) {
   parts <- map(codes, ~ extract_one_code(df, prefix, .x, type))
+  sum_na <- function(a, b) ifelse(is.na(a) & is.na(b), NA,
+                                  rowSums(cbind(a, b), na.rm = TRUE))
   reduce(parts, function(a, b) tibble(
-    consumed  = pmax(a$consumed,  b$consumed,  na.rm = TRUE),
-    # sum quantities/expenditure treating NA as 0, but keep NA if both NA
-    qty_total = ifelse(is.na(a$qty_total) & is.na(b$qty_total), NA,
-                       rowSums(cbind(a$qty_total, b$qty_total), na.rm = TRUE)),
-    qty_purch = ifelse(is.na(a$qty_purch) & is.na(b$qty_purch), NA,
-                       rowSums(cbind(a$qty_purch, b$qty_purch), na.rm = TRUE)),
-    exp       = ifelse(is.na(a$exp) & is.na(b$exp), NA,
-                       rowSums(cbind(a$exp, b$exp), na.rm = TRUE))
+    consumed  = pmax(a$consumed, b$consumed, na.rm = TRUE),
+    qty_total = sum_na(a$qty_total, b$qty_total),
+    qty_purch = sum_na(a$qty_purch, b$qty_purch),
+    qty_own   = sum_na(a$qty_own,   b$qty_own),
+    qty_gift  = sum_na(a$qty_gift,  b$qty_gift),
+    exp       = sum_na(a$exp,       b$exp)
   ))
 }
 
@@ -317,10 +323,13 @@ items <- bind_rows(item_list) %>%
 ## TSH/kg vs a median of ~6,000.)
 items <- items %>%
   group_by(item, wave) %>%
-  mutate(across(c(unit_value, qty_total, qty_purch, exp), trim_to_na)) %>%
+  mutate(across(c(unit_value, qty_total, qty_purch, qty_own, qty_gift, exp), trim_to_na)) %>%
   ungroup() %>%
   mutate(
     qty_total_pae = qty_total / adulteq,   # quantity per adult equivalent
+    qty_purch_pae = qty_purch / adulteq,   # by source, per adult equivalent
+    qty_own_pae   = qty_own   / adulteq,
+    qty_gift_pae  = qty_gift  / adulteq,
     exp_pae       = exp / adulteq,         # expenditure per adult equivalent
     item_label    = item_cfg$label[match(item, item_cfg$item)]
   )
@@ -388,6 +397,44 @@ item_summary <- items %>%
 write.csv(item_summary, file.path(out_tab, "02_item_summary.csv"), row.names = FALSE)
 print(item_summary)
 
+## ---- 5c. Item summary BY LIVESTOCK OWNERSHIP -------------------------------
+## Do households that own livestock consume/spend/pay differently?
+item_by_livestock <- items %>%
+  mutate(livestock_owner = ifelse(livestock == 1, "Owns livestock", "No livestock")) %>%
+  group_by(item_label, livestock_owner) %>%
+  summarise(
+    pct_consuming     = 100 * wmean(consumed, weight),
+    mean_qty_pae      = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight),
+    mean_exp_pae      = wmean(ifelse(exp > 0, exp_pae, NA),             weight),
+    median_unit_value = wmedian(unit_value, weight),
+    .groups = "drop"
+  )
+write.csv(item_by_livestock, file.path(out_tab, "02b_item_by_livestock.csv"), row.names = FALSE)
+
+## ---- 5d. Source of consumed quantity: purchased / own / gifts --------------
+## Mean quantity per adult equivalent by source, per item (and by livestock).
+## Useful to see self-provisioning (own production) vs market vs gifts.
+source_decomp <- items %>%
+  group_by(item_label) %>%
+  summarise(
+    Purchased = wmean(ifelse(qty_total > 0, qty_purch_pae, NA), weight),
+    `Own production` = wmean(ifelse(qty_total > 0, qty_own_pae,  NA), weight),
+    Gifts     = wmean(ifelse(qty_total > 0, qty_gift_pae, NA), weight),
+    .groups = "drop"
+  )
+write.csv(source_decomp, file.path(out_tab, "02c_quantity_source.csv"), row.names = FALSE)
+
+source_by_livestock <- items %>%
+  mutate(livestock_owner = ifelse(livestock == 1, "Owns livestock", "No livestock")) %>%
+  group_by(item_label, livestock_owner) %>%
+  summarise(
+    Purchased = wmean(ifelse(qty_total > 0, qty_purch_pae, NA), weight),
+    `Own production` = wmean(ifelse(qty_total > 0, qty_own_pae,  NA), weight),
+    Gifts     = wmean(ifelse(qty_total > 0, qty_gift_pae, NA), weight),
+    .groups = "drop"
+  )
+write.csv(source_by_livestock, file.path(out_tab, "02d_quantity_source_by_livestock.csv"), row.names = FALSE)
+
 
 ## ============================================================================
 ## 6. WELFARE GROUPS: QUINTILES, QUARTILES, TERCILES
@@ -412,22 +459,27 @@ household <- household %>%
   ) %>%
   ungroup()
 
-## Re-attach the group labels to the long item table.
+## Re-attach the (full-population) group labels to the long item table.
 items <- items %>%
   select(-any_of(c("quintile", "quartile", "tercile"))) %>%
   left_join(household %>% select(wave, hhid, quintile, quartile, tercile),
             by = c("wave", "hhid"))
 
-## Generic helper: weighted item means by a grouping variable, optionally
-## restricted to rural or urban households.
-group_means <- function(data, group_var, area = c("all", "rural", "urban")) {
+## Weighted item means by welfare group. IMPORTANT: for rural / urban we recompute
+## the welfare groups WITHIN that area (and within wave), otherwise the few urban
+## households in the poorest population quintiles leave empty cells. So "Q1" for
+## area = "urban" is the poorest 20% OF URBAN households.
+group_means <- function(data, n, labels, gname, area = c("all", "rural", "urban")) {
   area <- match.arg(area)
   d <- data
   if (area == "rural") d <- filter(d, rural == 1)
   if (area == "urban") d <- filter(d, urban == 1)
   d %>%
-    filter(!is.na(.data[[group_var]])) %>%
-    group_by(item_label, group = .data[[group_var]]) %>%
+    group_by(wave) %>%
+    mutate(group = wtd_group(welfare_pae, weight, n, labels)) %>%
+    ungroup() %>%
+    filter(!is.na(group)) %>%
+    group_by(item_label, group) %>%
     summarise(
       n_obs      = sum(qty_total > 0 & is.finite(weight), na.rm = TRUE),
       qty_pae    = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight),
@@ -435,44 +487,62 @@ group_means <- function(data, group_var, area = c("all", "rural", "urban")) {
       unit_value = wmedian(unit_value, weight),   # median: robust price measure
       .groups = "drop"
     ) %>%
-    mutate(grouping = group_var, area = area)
+    mutate(grouping = gname, area = area)
 }
 
 ## Compute every combination: {quintile,quartile,tercile} x {all,rural,urban}.
-combos <- expand.grid(
-  gv   = c("quintile", "quartile", "tercile"),
-  area = c("all", "rural", "urban"),
-  stringsAsFactors = FALSE
+group_spec <- list(
+  quintile = list(n = 5, labels = paste0("Q",  1:5)),
+  quartile = list(n = 4, labels = paste0("Qt", 1:4)),
+  tercile  = list(n = 3, labels = paste0("T",  1:3))
 )
-group_tables <- pmap_dfr(combos, function(gv, area) group_means(items, gv, area))
+combos <- expand.grid(gv = names(group_spec), area = c("all", "rural", "urban"),
+                      stringsAsFactors = FALSE)
+group_tables <- pmap_dfr(combos, function(gv, area)
+  group_means(items, group_spec[[gv]]$n, group_spec[[gv]]$labels, gv, area))
 
 write.csv(group_tables, file.path(out_tab, "03_group_means.csv"), row.names = FALSE)
 
 
 ## ============================================================================
-## 7. Q5 / Q1 RATIOS  (quantity, expenditure, unit value)
+## 7. TOP/BOTTOM RATIOS  (quantity, expenditure, unit value)
 ## ============================================================================
-## How much more do the richest 20% consume / spend / pay-per-unit relative to
-## the poorest 20% ? Computed for All / Rural / Urban.
-
-## Small cells are unreliable: ratios are blanked when either Q1 or Q5 has
-## fewer than 30 consuming households (e.g. urban pork, urban eggs).
+## How much more does the richest group consume / spend / pay-per-unit relative
+## to the poorest group ? We report BOTH the quintile ratio (Q5/Q1) and the
+## quartile ratio (Qt4/Qt1). Quartiles use larger cells, so they are more
+## reliable for thin items (pork) and for the urban subsample.
+## Ratios are blanked when either end-group has < 30 consuming households.
 min_cell <- 30
-q5q1_ratios <- group_tables %>%
-  filter(grouping == "quintile", group %in% c("Q1", "Q5")) %>%
-  pivot_wider(id_cols = c(item_label, area), names_from = group,
-              values_from = c(n_obs, qty_pae, exp_pae, unit_value)) %>%
-  mutate(
-    enough = pmin(n_obs_Q1, n_obs_Q5) >= min_cell,
-    qty_ratio_Q5_Q1  = ifelse(enough, qty_pae_Q5    / qty_pae_Q1,    NA_real_),
-    exp_ratio_Q5_Q1  = ifelse(enough, exp_pae_Q5    / exp_pae_Q1,    NA_real_),
-    uv_ratio_Q5_Q1   = ifelse(enough, unit_value_Q5 / unit_value_Q1, NA_real_),
-    n_min = pmin(n_obs_Q1, n_obs_Q5)
-  ) %>%
-  select(item_label, area, n_min, qty_ratio_Q5_Q1, exp_ratio_Q5_Q1, uv_ratio_Q5_Q1)
 
-write.csv(q5q1_ratios, file.path(out_tab, "04_Q5_Q1_ratios.csv"), row.names = FALSE)
-print(q5q1_ratios)
+top_bottom_ratio <- function(gname, lo, hi) {
+  group_tables %>%
+    filter(grouping == gname, group %in% c(lo, hi)) %>%
+    mutate(end = ifelse(group == lo, "bot", "top")) %>%
+    pivot_wider(id_cols = c(item_label, area), names_from = end,
+                values_from = c(n_obs, qty_pae, exp_pae, unit_value)) %>%
+    mutate(
+      enough     = pmin(n_obs_bot, n_obs_top) >= min_cell,
+      n_min      = pmin(n_obs_bot, n_obs_top),
+      qty_ratio  = ifelse(enough, qty_pae_top    / qty_pae_bot,    NA_real_),
+      exp_ratio  = ifelse(enough, exp_pae_top    / exp_pae_bot,    NA_real_),
+      uv_ratio   = ifelse(enough, unit_value_top / unit_value_bot, NA_real_),
+      grouping   = gname
+    ) %>%
+    select(item_label, area, grouping, n_min, qty_ratio, exp_ratio, uv_ratio)
+}
+
+ratios <- bind_rows(
+  top_bottom_ratio("quintile", "Q1",  "Q5"),
+  top_bottom_ratio("quartile", "Qt1", "Qt4")
+)
+write.csv(ratios, file.path(out_tab, "04_top_bottom_ratios.csv"), row.names = FALSE)
+
+## Keep the quintile, all-households table for the headline figure/back-compat.
+q5q1_ratios <- ratios %>%
+  filter(grouping == "quintile") %>%
+  rename(qty_ratio_Q5_Q1 = qty_ratio, exp_ratio_Q5_Q1 = exp_ratio,
+         uv_ratio_Q5_Q1 = uv_ratio)
+print(as.data.frame(q5q1_ratios), digits = 3)
 
 
 ## ============================================================================
@@ -546,7 +616,8 @@ est <- items %>%
     ln_uv  = log(unit_value),
     ln_w   = log(welfare_pae),
     ln_ae  = log(adulteq),
-    rural  = factor(rural),
+    # rural / urban / livestock kept as 0/1 (a 0/1 numeric is a valid dummy in lm
+    # and lets us filter subsamples cleanly); wave & region are factors for FE.
     wave   = factor(wave),
     region = factor(region)
   )
@@ -623,6 +694,30 @@ write.csv(elasticities, file.path(out_tab, "05_elasticities.csv"), row.names = F
 cat("\n==== Elasticity decomposition (eps_expenditure = eps_quantity + eps_quality) ====\n")
 print(as.data.frame(elasticities), digits = 3)
 
+## ---- 9c. Elasticities by SUBGROUP: rural / urban / livestock ---------------
+## Pooled across items (item + wave fixed effects), estimated on each subsample.
+## Answers "is quality upgrading stronger for urban or for livestock owners?"
+estimate_subgroup <- function(d, label) {
+  fx  <- "ln_w + ln_ae + wave + region + item"   # rural/livestock define the subsample
+  m_e <- lm(as.formula(paste("ln_exp ~", fx)), data = d)
+  m_q <- lm(as.formula(paste("ln_q   ~", fx)), data = d)
+  m_u <- lm(as.formula(paste("ln_uv  ~", fx)), data = d)
+  qt  <- one_sided_quality_test(m_u)
+  tibble(subgroup = label, n = nrow(d),
+         eps_expenditure = rob_coef(m_e), eps_quantity = rob_coef(m_q),
+         eps_quality = qt["estimate"], quality_se = qt["se"],
+         quality_p_1side = qt["p_one_sided"])
+}
+subgroup_elast <- bind_rows(
+  estimate_subgroup(filter(est_pooled, rural == 1), "Rural"),
+  estimate_subgroup(filter(est_pooled, urban == 1), "Urban"),
+  estimate_subgroup(filter(est_pooled, livestock == 1), "Owns livestock"),
+  estimate_subgroup(filter(est_pooled, livestock == 0), "No livestock")
+)
+write.csv(subgroup_elast, file.path(out_tab, "05b_elasticities_by_subgroup.csv"), row.names = FALSE)
+cat("\n==== Elasticities by subgroup (rural/urban, livestock) ====\n")
+print(as.data.frame(subgroup_elast), digits = 3)
+
 
 ## ---- 9b. Elasticity decomposition graph ------------------------------------
 elas_long <- elasticities %>%
@@ -694,23 +789,49 @@ q_income_by_wave <- household %>%
             .groups = "drop")
 write.csv(q_income_by_wave, file.path(out_tab, "07_quintile_income_by_wave.csv"), row.names = FALSE)
 
-## ---- (B) Quality SHARE of the expenditure elasticity, by quintile ----------
-## Let BOTH the expenditure and unit-value slopes vary by quintile; the share
+## ---- (B) Quality SHARE of the expenditure elasticity, by quintile & quartile
+## Let BOTH the expenditure and unit-value slopes vary by group; the share
 ## eps_quality / eps_expenditure says how much of the income response is quality.
-m_ex_byq <- lm(ln_exp ~ quintile + quintile:ln_w + ln_ae + rural + wave + region + item,
-               data = est_q)
-ex_slopes <- coef(m_ex_byq)[grep("ln_w", names(coef(m_ex_byq)))]
-uv_slopes <- coef(m_uv_byq)[grep("ln_w", names(coef(m_uv_byq)))]
-quality_share <- tibble(
-  quintile        = str_extract(names(ex_slopes), "Q[1-5]"),
-  eps_expenditure = as.numeric(ex_slopes),
-  eps_quality     = as.numeric(uv_slopes)
-) %>%
-  mutate(quality_share_pct = 100 * eps_quality / eps_expenditure) %>%
-  arrange(quintile)
-write.csv(quality_share, file.path(out_tab, "08_quality_share_by_quintile.csv"), row.names = FALSE)
-cat("\n==== Quality share of the expenditure elasticity, by quintile ====\n")
+## The "shift from quantity to quality" is where this share STARTS TO RISE (its
+## minimum group): below it the marginal food budget goes mostly to quantity,
+## above it quality takes a growing slice. (Indicative -- the profile is shallow.)
+quality_share_by <- function(gv, labs) {
+  d   <- est_pooled %>% filter(!is.na(.data[[gv]])) %>% mutate(g = factor(.data[[gv]]))
+  m_u <- lm(ln_uv  ~ g + g:ln_w + ln_ae + rural + wave + region + item, data = d)
+  m_e <- lm(ln_exp ~ g + g:ln_w + ln_ae + rural + wave + region + item, data = d)
+  us  <- coef(m_u)[grep(":ln_w", names(coef(m_u)))]
+  es  <- coef(m_e)[grep(":ln_w", names(coef(m_e)))]
+  tibble(
+    grouping        = gv,
+    group           = factor(str_remove(str_remove(names(us), "^g"), ":ln_w"), levels = labs),
+    eps_expenditure = as.numeric(es),
+    eps_quality     = as.numeric(us)
+  ) %>%
+    mutate(quality_share_pct = 100 * eps_quality / eps_expenditure) %>%
+    arrange(group)
+}
+quality_share <- bind_rows(
+  quality_share_by("quintile", paste0("Q",  1:5)),
+  quality_share_by("quartile", paste0("Qt", 1:4))
+)
+write.csv(quality_share, file.path(out_tab, "08_quality_share_by_group.csv"), row.names = FALSE)
+cat("\n==== Quality share of the expenditure elasticity (quintiles & quartiles) ====\n")
 print(as.data.frame(quality_share), digits = 3)
+
+## "Shift" group = where the quality share is lowest (it rises afterwards), and
+## the corresponding welfare per AE (lower edge of that group) by wave.
+shift_income <- map_dfr(c("quintile", "quartile"), function(gv) {
+  qs    <- filter(quality_share, grouping == gv)
+  kmin  <- which.min(qs$quality_share_pct)              # turning point group index
+  n_g   <- length(qs$group)
+  prob  <- (kmin - 1) / n_g                             # lower edge of that group
+  household %>% filter(!is.na(welfare_pae)) %>% group_by(wave) %>%
+    summarise(shift_welfare_pae = wtd_quantile(welfare_pae, weight, prob), .groups = "drop") %>%
+    mutate(grouping = gv, shift_group = as.character(qs$group[kmin]))
+})
+write.csv(shift_income, file.path(out_tab, "08b_shift_income_by_wave.csv"), row.names = FALSE)
+cat("\nIndicative income where the quantity->quality shift begins (quality share turns up):\n")
+print(as.data.frame(shift_income), digits = 6)
 
 ## ---- (C) Robustness: elasticities estimated separately by wave -------------
 ## If pooling is valid the per-wave elasticities should be similar.
@@ -870,6 +991,62 @@ g15 <- ggplot(elas_ci, aes(eps_quality, reorder(item_label, eps_quality))) +
        x = "Quality elasticity (eps_quality)", y = NULL)
 ggsave(file.path(out_fig, "fig15_quality_forest.png"), g15, width = 8, height = 5, dpi = 150)
 
+## ---- fig16. Source of consumed quantity: purchased / own / gifts -----------
+src_long <- source_decomp %>%
+  pivot_longer(c(Purchased, `Own production`, Gifts),
+               names_to = "source", values_to = "qty_pae") %>%
+  mutate(source = factor(source, levels = c("Purchased", "Own production", "Gifts")))
+g16 <- ggplot(src_long, aes(item_label, qty_pae, fill = source)) +
+  geom_col() +
+  labs(title = "Where consumed quantity comes from (mean per adult equivalent)",
+       subtitle = "Beef/pork are bought; chicken is mostly gifted; goat/eggs/milk partly home-produced",
+       x = NULL, y = "Quantity per AE (kg / litre / pieces, 7 days)", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig16_quantity_source.png"), g16, width = 9, height = 5, dpi = 150)
+
+## ---- fig17. Source of quantity by livestock ownership ----------------------
+src_liv <- source_by_livestock %>%
+  pivot_longer(c(Purchased, `Own production`, Gifts),
+               names_to = "source", values_to = "qty_pae") %>%
+  mutate(source = factor(source, levels = c("Purchased", "Own production", "Gifts")))
+g17 <- ggplot(src_liv, aes(item_label, qty_pae, fill = source)) +
+  geom_col() +
+  facet_wrap(~ livestock_owner) +
+  labs(title = "Quantity source by livestock ownership",
+       subtitle = "Owners self-provision (own production); non-owners buy or receive gifts",
+       x = NULL, y = "Quantity per AE", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+ggsave(file.path(out_fig, "fig17_source_by_livestock.png"), g17, width = 10, height = 5, dpi = 150)
+
+## ---- fig18. Item participation & expenditure by livestock ------------------
+g18 <- ggplot(item_by_livestock, aes(item_label, mean_exp_pae, fill = livestock_owner)) +
+  geom_col(position = position_dodge()) +
+  labs(title = "Expenditure per AE by livestock ownership",
+       x = NULL, y = "Expenditure per AE (TSH, consumers)", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig18_expenditure_by_livestock.png"), g18, width = 9, height = 5, dpi = 150)
+
+## ---- fig19. Quality SHARE of expenditure elasticity, quintiles & quartiles -
+g19 <- ggplot(quality_share, aes(group, quality_share_pct)) +
+  geom_col(fill = "darkorange") +
+  facet_wrap(~ grouping, scales = "free_x") +
+  labs(title = "Quality's share of the expenditure response, by welfare group",
+       subtitle = "Quantity dominates everywhere; quality's share is lowest in the lower-middle and rises after",
+       x = "Welfare group (poor -> rich)", y = "Quality share of expenditure elasticity (%)")
+ggsave(file.path(out_fig, "fig19_quality_share.png"), g19, width = 10, height = 5, dpi = 150)
+
+## ---- fig20. Unit-value gradient, rural vs urban (within-area quintiles) -----
+uv_area <- group_tables %>%
+  filter(grouping == "quintile", area %in% c("rural", "urban"))
+g20 <- ggplot(uv_area, aes(group, unit_value, colour = area, group = area)) +
+  geom_line() + geom_point() +
+  facet_wrap(~ item_label, scales = "free_y") +
+  labs(title = "Unit value across welfare quintiles: rural vs urban",
+       subtitle = "Quintiles defined within each area",
+       x = "Welfare quintile (within area)", y = "Median unit value (TSH per std unit)",
+       colour = NULL)
+ggsave(file.path(out_fig, "fig20_unitvalue_rural_urban.png"), g20, width = 10, height = 6, dpi = 150)
+
 
 ## ============================================================================
 ## 12. DONE
@@ -881,3 +1058,6 @@ cat(" * 'Processed milk' is not available in these master files; the analysis\n"
 cat("   covers goat meat, beef, pork, chicken & poultry, eggs, and fresh milk.\n")
 cat(" * Real expenditure per AE is not level-comparable across waves, so welfare\n")
 cat("   groups are built WITHIN wave and elasticities use wave fixed effects.\n")
+cat(" * Rural/urban gradients use welfare groups defined WITHIN each area.\n")
+cat("\nTo build the final report, knit 02_report.Rmd:\n")
+cat('   rmarkdown::render("02_report.Rmd")   # produces 02_report.html\n')

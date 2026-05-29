@@ -77,9 +77,11 @@ kable(tab("02c_quantity_source.csv"), digits = 2,
 fig("fig16_quantity_source.png"); fig("fig17_source_by_livestock.png")
 ```
 
-Beef and pork are almost entirely **purchased**; **chicken is largely received
-as gifts**; goat meat, eggs and milk have a sizeable **own-production** share.
-Livestock owners self-provision (own production), non-owners buy or receive gifts.
+Beef and pork are almost entirely **purchased**; **goat meat, chicken, eggs and
+fresh milk have large own-production (home-raised) shares**; gifts are a minor
+source for most items. Livestock owners self-provision (own production), while
+non-owners rely on the market and gifts. (Source quantities are averaged over
+all consumers, with non-reporters counted as 0, so the bars stack to the total.)
 
 ## By livestock ownership
 

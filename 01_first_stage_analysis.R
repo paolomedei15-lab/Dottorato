@@ -412,25 +412,32 @@ item_by_livestock <- items %>%
 write.csv(item_by_livestock, file.path(out_tab, "02b_item_by_livestock.csv"), row.names = FALSE)
 
 ## ---- 5d. Source of consumed quantity: purchased / own / gifts --------------
-## Mean quantity per adult equivalent by source, per item (and by livestock).
-## Useful to see self-provisioning (own production) vs market vs gifts.
+## Mean quantity per adult equivalent by source, over CONSUMERS. A household that
+## did not buy / produce / receive an item contributes 0 to that source (not NA),
+## so the three sources are averaged over the SAME households and stack up to the
+## total consumed quantity. (Without this they would be averaged over different
+## denominators -- e.g. beef "own production" over only the ~20 self-slaughtering
+## households -- which made the stacked bar nonsensical.)
+src0 <- function(x) coalesce(x, 0)   # missing source contribution = 0
 source_decomp <- items %>%
+  filter(qty_total > 0) %>%
   group_by(item_label) %>%
   summarise(
-    Purchased = wmean(ifelse(qty_total > 0, qty_purch_pae, NA), weight),
-    `Own production` = wmean(ifelse(qty_total > 0, qty_own_pae,  NA), weight),
-    Gifts     = wmean(ifelse(qty_total > 0, qty_gift_pae, NA), weight),
+    Purchased        = wmean(src0(qty_purch_pae), weight),
+    `Own production` = wmean(src0(qty_own_pae),   weight),
+    Gifts            = wmean(src0(qty_gift_pae),  weight),
     .groups = "drop"
   )
 write.csv(source_decomp, file.path(out_tab, "02c_quantity_source.csv"), row.names = FALSE)
 
 source_by_livestock <- items %>%
+  filter(qty_total > 0) %>%
   mutate(livestock_owner = ifelse(livestock == 1, "Owns livestock", "No livestock")) %>%
   group_by(item_label, livestock_owner) %>%
   summarise(
-    Purchased = wmean(ifelse(qty_total > 0, qty_purch_pae, NA), weight),
-    `Own production` = wmean(ifelse(qty_total > 0, qty_own_pae,  NA), weight),
-    Gifts     = wmean(ifelse(qty_total > 0, qty_gift_pae, NA), weight),
+    Purchased        = wmean(src0(qty_purch_pae), weight),
+    `Own production` = wmean(src0(qty_own_pae),   weight),
+    Gifts            = wmean(src0(qty_gift_pae),  weight),
     .groups = "drop"
   )
 write.csv(source_by_livestock, file.path(out_tab, "02d_quantity_source_by_livestock.csv"), row.names = FALSE)
@@ -999,8 +1006,8 @@ src_long <- source_decomp %>%
 g16 <- ggplot(src_long, aes(item_label, qty_pae, fill = source)) +
   geom_col() +
   labs(title = "Where consumed quantity comes from (mean per adult equivalent)",
-       subtitle = "Beef/pork are bought; chicken is mostly gifted; goat/eggs/milk partly home-produced",
-       x = NULL, y = "Quantity per AE (kg / litre / pieces, 7 days)", fill = NULL) +
+       subtitle = "Beef & pork are bought; goat, chicken, eggs and milk have large own-production shares",
+       x = NULL, y = "Quantity per AE (kg / litre / pieces, 7 days); bars stack to total", fill = NULL) +
   theme(axis.text.x = element_text(angle = 25, hjust = 1))
 ggsave(file.path(out_fig, "fig16_quantity_source.png"), g16, width = 9, height = 5, dpi = 150)
 

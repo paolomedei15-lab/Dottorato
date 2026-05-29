@@ -195,14 +195,16 @@ wave_cfg <- list(
 )
 
 ## The six items. For Wave 5 chicken we combine codes 8041 + 8042.
+## `unit` is the physical unit each item is measured in (NEVER mix them on a
+## shared axis): meats in kg, eggs in pieces, milk in litres.
 item_cfg <- tibble::tribble(
-  ~item,         ~label,                 ~type,     ~codes_std,    ~codes_y5,
-  "goat_meat",   "Goat meat",            "meat",    "801",         "801",
-  "beef",        "Beef",                 "meat",    "802",         "802",
-  "pork",        "Pork",                 "meat",    "803",         "803",
-  "chicken",     "Chicken & poultry",    "meat",    "804",         "8041,8042",
-  "eggs",        "Eggs",                 "pieces",  "807",         "807",
-  "fresh_milk",  "Fresh milk",           "litre",   "901",         "901"
+  ~item,         ~label,                 ~type,     ~unit,     ~codes_std,    ~codes_y5,
+  "goat_meat",   "Goat meat",            "meat",    "kg",      "801",         "801",
+  "beef",        "Beef",                 "meat",    "kg",      "802",         "802",
+  "pork",        "Pork",                 "meat",    "kg",      "803",         "803",
+  "chicken",     "Chicken & poultry",    "meat",    "kg",      "804",         "8041,8042",
+  "eggs",        "Eggs",                 "pieces",  "piece",   "807",         "807",
+  "fresh_milk",  "Fresh milk",           "litre",   "litre",   "901",         "901"
 )
 
 
@@ -331,12 +333,16 @@ items <- items %>%
     qty_own_pae   = qty_own   / adulteq,
     qty_gift_pae  = qty_gift  / adulteq,
     exp_pae       = exp / adulteq,         # expenditure per adult equivalent
-    item_label    = item_cfg$label[match(item, item_cfg$item)]
+    item_label    = item_cfg$label[match(item, item_cfg$item)],
+    unit          = item_cfg$unit[match(item, item_cfg$item)]   # kg / piece / litre
   )
 
 ## Order item labels nicely for all tables/plots.
 item_levels <- item_cfg$label
 items$item_label <- factor(items$item_label, levels = item_levels)
+## Facet strip label that ALWAYS shows the unit, e.g. "Beef (kg)", "Eggs (piece)".
+items$item_unit <- factor(paste0(items$item_label, " (", items$unit, ")"),
+                          levels = paste0(item_cfg$label, " (", item_cfg$unit, ")"))
 
 message("Households pooled: ", nrow(household),
         " | item-rows: ", nrow(items))
@@ -383,6 +389,7 @@ print(hh_summary)
 item_summary <- items %>%
   group_by(item_label) %>%
   summarise(
+    unit               = first(unit),
     pct_consuming      = 100 * wmean(consumed, weight),
     # household level
     mean_qty_hh        = wmean(ifelse(qty_total > 0, qty_total, NA), weight),
@@ -488,6 +495,7 @@ group_means <- function(data, n, labels, gname, area = c("all", "rural", "urban"
     filter(!is.na(group)) %>%
     group_by(item_label, group) %>%
     summarise(
+      unit       = first(unit),
       n_obs      = sum(qty_total > 0 & is.finite(weight), na.rm = TRUE),
       qty_pae    = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight),
       exp_pae    = wmean(ifelse(exp > 0, exp_pae, NA),             weight),
@@ -508,6 +516,11 @@ combos <- expand.grid(gv = names(group_spec), area = c("all", "rural", "urban"),
 group_tables <- pmap_dfr(combos, function(gv, area)
   group_means(items, group_spec[[gv]]$n, group_spec[[gv]]$labels, gv, area))
 
+## Facet label that always carries the unit (e.g. "Beef (kg)", "Eggs (piece)").
+group_tables <- group_tables %>%
+  mutate(item_unit = factor(paste0(item_label, " (", unit, ")"),
+                            levels = paste0(item_cfg$label, " (", item_cfg$unit, ")")))
+
 write.csv(group_tables, file.path(out_tab, "03_group_means.csv"), row.names = FALSE)
 
 
@@ -525,7 +538,7 @@ top_bottom_ratio <- function(gname, lo, hi) {
   group_tables %>%
     filter(grouping == gname, group %in% c(lo, hi)) %>%
     mutate(end = ifelse(group == lo, "bot", "top")) %>%
-    pivot_wider(id_cols = c(item_label, area), names_from = end,
+    pivot_wider(id_cols = c(item_label, unit, area), names_from = end,
                 values_from = c(n_obs, qty_pae, exp_pae, unit_value)) %>%
     mutate(
       enough     = pmin(n_obs_bot, n_obs_top) >= min_cell,
@@ -535,7 +548,7 @@ top_bottom_ratio <- function(gname, lo, hi) {
       uv_ratio   = ifelse(enough, unit_value_top / unit_value_bot, NA_real_),
       grouping   = gname
     ) %>%
-    select(item_label, area, grouping, n_min, qty_ratio, exp_ratio, uv_ratio)
+    select(item_label, unit, area, grouping, n_min, qty_ratio, exp_ratio, uv_ratio)
 }
 
 ratios <- bind_rows(
@@ -577,27 +590,32 @@ g_ratio <- ggplot(ratio_long, aes(item_label, ratio, fill = measure)) +
 ggsave(file.path(out_fig, "fig1_Q5Q1_ratios.png"), g_ratio, width = 9, height = 5, dpi = 150)
 
 ## ---- 8b. Unit value across quintiles (the "quality gradient") --------------
-uv_by_q <- group_tables %>% filter(grouping == "quintile", area == "all")
-g_uv <- ggplot(uv_by_q, aes(group, unit_value, group = item_label, colour = item_label)) +
-  geom_line() + geom_point() +
-  labs(title = "Unit value by welfare quintile (quality gradient)",
+## One panel PER ITEM with its own y-scale, because units differ (TSH per kg for
+## meats, per litre for milk, per piece for eggs). Cells with < 30 consumers
+## (min_cell) are dropped so coarse/noisy points do not appear.
+uv_by_q <- group_tables %>% filter(grouping == "quintile", area == "all", n_obs >= min_cell)
+g_uv <- ggplot(uv_by_q, aes(group, unit_value, group = 1)) +
+  geom_line(colour = "steelblue") + geom_point(colour = "steelblue") +
+  facet_wrap(~ item_unit, scales = "free_y") +
+  labs(title = "Unit value (quality gradient) by welfare quintile",
+       subtitle = "Each panel in its own unit; median; cells with < 30 consumers dropped",
        x = "Welfare quintile (real expenditure per adult equivalent)",
-       y = "Unit value (TSH per kg / litre / piece)", colour = NULL)
-ggsave(file.path(out_fig, "fig2_unitvalue_quintiles.png"), g_uv, width = 9, height = 5, dpi = 150)
+       y = "Median unit value (TSH per unit shown in panel title)")
+ggsave(file.path(out_fig, "fig2_unitvalue_quintiles.png"), g_uv, width = 10, height = 6, dpi = 150)
 
-## ---- 8c. Rural vs urban comparison -----------------------------------------
+## ---- 8c. Rural vs urban: average unit value (one panel per item) ------------
 rural_urban <- group_tables %>%
-  filter(grouping == "quintile", area %in% c("rural", "urban")) %>%
-  group_by(item_label, area) %>%
-  summarise(unit_value = mean(unit_value, na.rm = TRUE),
-            exp_pae    = mean(exp_pae,    na.rm = TRUE), .groups = "drop")
+  filter(grouping == "quintile", area %in% c("rural", "urban"), n_obs >= min_cell) %>%
+  group_by(item_unit, area) %>%
+  summarise(unit_value = mean(unit_value, na.rm = TRUE), .groups = "drop")
 
-g_ru <- ggplot(rural_urban, aes(item_label, unit_value, fill = area)) +
-  geom_col(position = position_dodge()) +
+g_ru <- ggplot(rural_urban, aes(area, unit_value, fill = area)) +
+  geom_col() +
+  facet_wrap(~ item_unit, scales = "free_y") +
   labs(title = "Rural vs urban: average unit value by item",
-       x = NULL, y = "Unit value (TSH per std unit)", fill = NULL) +
-  theme(axis.text.x = element_text(angle = 25, hjust = 1))
-ggsave(file.path(out_fig, "fig3_rural_urban_unitvalue.png"), g_ru, width = 9, height = 5, dpi = 150)
+       subtitle = "Each panel in its own unit (TSH per kg / litre / piece)",
+       x = NULL, y = "Median unit value (TSH per unit shown)", fill = NULL)
+ggsave(file.path(out_fig, "fig3_rural_urban_unitvalue.png"), g_ru, width = 10, height = 6, dpi = 150)
 
 
 ## ============================================================================
@@ -901,13 +919,16 @@ g7 <- ggplot(item_summary, aes(reorder(item_label, pct_consuming), pct_consuming
 ggsave(file.path(out_fig, "fig7_participation.png"), g7, width = 8, height = 5, dpi = 150)
 
 ## ---- fig8. Quantity per adult equivalent by welfare quintile ---------------
-qty_by_q <- group_tables %>% filter(grouping == "quintile", area == "all")
-g8 <- ggplot(qty_by_q, aes(group, qty_pae, colour = item_label, group = item_label)) +
-  geom_line() + geom_point() +
+## One panel per item (own y-scale) because units differ: kg (meats), litre
+## (milk), pieces (eggs). Eggs are counted in NUMBER OF EGGS, not kg.
+qty_by_q <- group_tables %>% filter(grouping == "quintile", area == "all", n_obs >= min_cell)
+g8 <- ggplot(qty_by_q, aes(group, qty_pae, group = 1)) +
+  geom_line(colour = "darkgreen") + geom_point(colour = "darkgreen") +
+  facet_wrap(~ item_unit, scales = "free_y") +
   labs(title = "Quantity per adult equivalent by welfare quintile",
-       x = "Welfare quintile", y = "Quantity per AE (kg / litre / pieces, 7 days)",
-       colour = NULL)
-ggsave(file.path(out_fig, "fig8_quantity_quintiles.png"), g8, width = 9, height = 5, dpi = 150)
+       subtitle = "Each panel in its own unit (kg meats / litre milk / pieces eggs), 7-day recall",
+       x = "Welfare quintile", y = "Quantity per AE (unit in panel title)")
+ggsave(file.path(out_fig, "fig8_quantity_quintiles.png"), g8, width = 10, height = 6, dpi = 150)
 
 ## ---- fig9. Expenditure per adult equivalent by welfare quintile ------------
 exp_by_q <- group_tables %>% filter(grouping == "quintile", area == "all")
@@ -933,20 +954,32 @@ g10 <- ggplot(ratio_all_areas, aes(item_label, ratio, fill = measure)) +
   theme(axis.text.x = element_text(angle = 25, hjust = 1))
 ggsave(file.path(out_fig, "fig10_Q5Q1_by_area.png"), g10, width = 9, height = 9, dpi = 150)
 
-## ---- fig11. Rural vs urban: quantity and expenditure per AE ----------------
-ru_qexp <- group_tables %>%
-  filter(grouping == "quintile", area %in% c("rural", "urban")) %>%
+## ---- fig11. Rural vs urban: EXPENDITURE per AE (TSH, comparable) ------------
+## Expenditure is in TSH for every item, so it can share one axis. (Quantity is
+## shown separately in fig11b because its unit differs across items.)
+ru_exp <- group_tables %>%
+  filter(grouping == "quintile", area %in% c("rural", "urban"), n_obs >= min_cell) %>%
   group_by(item_label, area) %>%
-  summarise(Quantity = mean(qty_pae, na.rm = TRUE),
-            Expenditure = mean(exp_pae, na.rm = TRUE), .groups = "drop") %>%
-  pivot_longer(c(Quantity, Expenditure), names_to = "measure", values_to = "value")
-g11 <- ggplot(ru_qexp, aes(item_label, value, fill = area)) +
+  summarise(exp_pae = mean(exp_pae, na.rm = TRUE), .groups = "drop")
+g11 <- ggplot(ru_exp, aes(item_label, exp_pae, fill = area)) +
   geom_col(position = position_dodge()) +
-  facet_wrap(~ measure, scales = "free_y") +
-  labs(title = "Rural vs urban: quantity and expenditure per adult equivalent",
-       x = NULL, y = NULL, fill = NULL) +
-  theme(axis.text.x = element_text(angle = 35, hjust = 1))
-ggsave(file.path(out_fig, "fig11_rural_urban_qty_exp.png"), g11, width = 10, height = 5, dpi = 150)
+  labs(title = "Rural vs urban: expenditure per adult equivalent",
+       x = NULL, y = "Expenditure per AE (TSH, 7 days)", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig11_rural_urban_expenditure.png"), g11, width = 9, height = 5, dpi = 150)
+
+## ---- fig11b. Rural vs urban: QUANTITY per AE (one panel per item/unit) ------
+ru_qty <- group_tables %>%
+  filter(grouping == "quintile", area %in% c("rural", "urban"), n_obs >= min_cell) %>%
+  group_by(item_unit, area) %>%
+  summarise(qty_pae = mean(qty_pae, na.rm = TRUE), .groups = "drop")
+g11b <- ggplot(ru_qty, aes(area, qty_pae, fill = area)) +
+  geom_col() +
+  facet_wrap(~ item_unit, scales = "free_y") +
+  labs(title = "Rural vs urban: quantity per adult equivalent",
+       subtitle = "Each panel in its own unit (kg meats / litre milk / pieces eggs)",
+       x = NULL, y = "Quantity per AE (unit in panel title)", fill = NULL)
+ggsave(file.path(out_fig, "fig11b_rural_urban_quantity.png"), g11b, width = 10, height = 6, dpi = 150)
 
 ## ---- fig12. Engel curves: ln(expenditure) vs ln(welfare), by item ----------
 ## Slope of each line is (close to) the expenditure elasticity. Coloured by wave
@@ -969,17 +1002,25 @@ g13 <- ggplot(est, aes(ln_w, ln_uv, colour = wave)) +
        x = "log(real expenditure per AE)", y = "log(unit value)", colour = NULL)
 ggsave(file.path(out_fig, "fig13_quality_gradient.png"), g13, width = 10, height = 6, dpi = 150)
 
-## ---- fig14. Unit value across quintiles, quartiles and terciles ------------
-uv_groups <- group_tables %>% filter(area == "all") %>%
-  mutate(grouping = recode(grouping, quintile = "Quintiles",
-                           quartile = "Quartiles", tercile = "Terciles"))
-g14 <- ggplot(uv_groups, aes(group, unit_value, colour = item_label, group = item_label)) +
+## ---- fig14. Unit value gradient: quintiles vs quartiles, one panel per item -
+## Each item in its own panel/unit; the two partitions (quintiles, quartiles)
+## are drawn as separate series. Terciles omitted to keep it readable.
+uv_groups <- group_tables %>%
+  filter(area == "all", grouping %in% c("quintile", "quartile"), n_obs >= min_cell) %>%
+  mutate(rank = as.integer(factor(group, levels = c(paste0("Q",1:5), paste0("Qt",1:4)))),
+         partition = recode(grouping, quintile = "Quintiles", quartile = "Quartiles"),
+         # position 1..5 (quintiles) or 1..4 (quartiles) -> rescale to 0-1 for overlay
+         pos = ifelse(grouping == "quintile",
+                      (as.integer(str_extract(group, "[0-9]")) - 1) / 4,
+                      (as.integer(str_extract(group, "[0-9]")) - 1) / 3))
+g14 <- ggplot(uv_groups, aes(pos, unit_value, colour = partition, group = partition)) +
   geom_line() + geom_point() +
-  facet_wrap(~ grouping, scales = "free_x") +
-  labs(title = "Unit value (quality) gradient across welfare groups",
-       x = "Welfare group (poor -> rich)", y = "Median unit value (TSH per std unit)",
-       colour = NULL)
-ggsave(file.path(out_fig, "fig14_unitvalue_groups.png"), g14, width = 11, height = 5, dpi = 150)
+  facet_wrap(~ item_unit, scales = "free_y") +
+  scale_x_continuous(breaks = c(0, 0.5, 1), labels = c("poorest", "middle", "richest")) +
+  labs(title = "Unit-value (quality) gradient: quintiles vs quartiles",
+       subtitle = "Each panel in its own unit (TSH per kg / litre / piece); cells < 30 consumers dropped",
+       x = "Welfare group (poor -> rich)", y = "Median unit value", colour = NULL)
+ggsave(file.path(out_fig, "fig14_unitvalue_groups.png"), g14, width = 10, height = 6, dpi = 150)
 
 ## ---- fig15. Quality elasticity by item with 95% CI (forest plot) -----------
 ## Visual of the hypothesis test H0: eps_quality = 0. Points right of the dashed
@@ -998,30 +1039,54 @@ g15 <- ggplot(elas_ci, aes(eps_quality, reorder(item_label, eps_quality))) +
        x = "Quality elasticity (eps_quality)", y = NULL)
 ggsave(file.path(out_fig, "fig15_quality_forest.png"), g15, width = 8, height = 5, dpi = 150)
 
-## ---- fig16. Source of consumed quantity: purchased / own / gifts -----------
+## ---- fig16. Source of consumed quantity, as SHARES (%) ---------------------
+## Shares are unit-free, so they sidestep the kg/litre/piece problem and stack to
+## 100%. (position = "fill" normalises the absolute source quantities to shares
+## within each item; the shares are computed within each item's own unit.)
 src_long <- source_decomp %>%
   pivot_longer(c(Purchased, `Own production`, Gifts),
                names_to = "source", values_to = "qty_pae") %>%
   mutate(source = factor(source, levels = c("Purchased", "Own production", "Gifts")))
 g16 <- ggplot(src_long, aes(item_label, qty_pae, fill = source)) +
-  geom_col() +
-  labs(title = "Where consumed quantity comes from (mean per adult equivalent)",
+  geom_col(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Where consumed quantity comes from (share of quantity)",
        subtitle = "Beef & pork are bought; goat, chicken, eggs and milk have large own-production shares",
-       x = NULL, y = "Quantity per AE (kg / litre / pieces, 7 days); bars stack to total", fill = NULL) +
+       x = NULL, y = "Share of consumed quantity", fill = NULL) +
   theme(axis.text.x = element_text(angle = 25, hjust = 1))
-ggsave(file.path(out_fig, "fig16_quantity_source.png"), g16, width = 9, height = 5, dpi = 150)
+ggsave(file.path(out_fig, "fig16_quantity_source_shares.png"), g16, width = 9, height = 5, dpi = 150)
 
-## ---- fig17. Source of quantity by livestock ownership ----------------------
+## ---- fig16b. Same, but ABSOLUTE quantity, one panel per item (own unit) -----
+src_abs <- items %>%
+  filter(qty_total > 0) %>%
+  group_by(item_unit) %>%
+  summarise(Purchased = wmean(src0(qty_purch_pae), weight),
+            `Own production` = wmean(src0(qty_own_pae), weight),
+            Gifts = wmean(src0(qty_gift_pae), weight), .groups = "drop") %>%
+  pivot_longer(c(Purchased, `Own production`, Gifts),
+               names_to = "source", values_to = "qty_pae") %>%
+  mutate(source = factor(source, levels = c("Purchased", "Own production", "Gifts")))
+g16b <- ggplot(src_abs, aes(source, qty_pae, fill = source)) +
+  geom_col() +
+  facet_wrap(~ item_unit, scales = "free_y") +
+  labs(title = "Consumed quantity by source (absolute, per adult equivalent)",
+       subtitle = "Each panel in its own unit; eggs are in PIECES (number of eggs), not kg",
+       x = NULL, y = "Quantity per AE (unit in panel title)", fill = NULL) +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+ggsave(file.path(out_fig, "fig16b_quantity_source_abs.png"), g16b, width = 10, height = 6, dpi = 150)
+
+## ---- fig17. Source shares by livestock ownership ---------------------------
 src_liv <- source_by_livestock %>%
   pivot_longer(c(Purchased, `Own production`, Gifts),
                names_to = "source", values_to = "qty_pae") %>%
   mutate(source = factor(source, levels = c("Purchased", "Own production", "Gifts")))
 g17 <- ggplot(src_liv, aes(item_label, qty_pae, fill = source)) +
-  geom_col() +
+  geom_col(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
   facet_wrap(~ livestock_owner) +
-  labs(title = "Quantity source by livestock ownership",
+  labs(title = "Source of quantity by livestock ownership (shares)",
        subtitle = "Owners self-provision (own production); non-owners buy or receive gifts",
-       x = NULL, y = "Quantity per AE", fill = NULL) +
+       x = NULL, y = "Share of consumed quantity", fill = NULL) +
   theme(axis.text.x = element_text(angle = 35, hjust = 1))
 ggsave(file.path(out_fig, "fig17_source_by_livestock.png"), g17, width = 10, height = 5, dpi = 150)
 
@@ -1043,14 +1108,16 @@ g19 <- ggplot(quality_share, aes(group, quality_share_pct)) +
 ggsave(file.path(out_fig, "fig19_quality_share.png"), g19, width = 10, height = 5, dpi = 150)
 
 ## ---- fig20. Unit-value gradient, rural vs urban (within-area quintiles) -----
+## Drop cells with < 30 consumers (removes the noisy zig-zags, e.g. urban pork/
+## goat, where only a handful of households report a unit value).
 uv_area <- group_tables %>%
-  filter(grouping == "quintile", area %in% c("rural", "urban"))
+  filter(grouping == "quintile", area %in% c("rural", "urban"), n_obs >= min_cell)
 g20 <- ggplot(uv_area, aes(group, unit_value, colour = area, group = area)) +
   geom_line() + geom_point() +
-  facet_wrap(~ item_label, scales = "free_y") +
+  facet_wrap(~ item_unit, scales = "free_y") +
   labs(title = "Unit value across welfare quintiles: rural vs urban",
-       subtitle = "Quintiles defined within each area",
-       x = "Welfare quintile (within area)", y = "Median unit value (TSH per std unit)",
+       subtitle = "Quintiles within each area; each panel its own unit; cells < 30 consumers dropped",
+       x = "Welfare quintile (within area)", y = "Median unit value (TSH per unit shown)",
        colour = NULL)
 ggsave(file.path(out_fig, "fig20_unitvalue_rural_urban.png"), g20, width = 10, height = 6, dpi = 150)
 

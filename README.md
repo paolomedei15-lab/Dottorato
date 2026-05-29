@@ -93,12 +93,12 @@ See `FINAL_REPORT.md` for the full write-up and the robustness checks.
 8. `fig8_quantity_quintiles` – quantity per AE across quintiles
 9. `fig9_expenditure_quintiles` – expenditure per AE across quintiles
 10. `fig10_Q5Q1_by_area` – Q5/Q1 ratios faceted by all / rural / urban
-11. `fig11_rural_urban_qty_exp` – rural vs urban quantity and expenditure per AE
+11. `fig11_rural_urban_expenditure` (+ `fig11b` quantity) – rural vs urban per AE
 12. `fig12_engel_curves` – Engel curves (log expenditure vs log welfare) by item
 13. `fig13_quality_gradient` – log unit value vs log welfare by item (quality slope)
 14. `fig14_unitvalue_groups` – unit-value gradient across quintiles, quartiles, terciles
 15. `fig15_quality_forest` – quality elasticity by item with 95% CI (hypothesis test)
-16. `fig16_quantity_source` – consumed quantity by source (purchased / own / gifts)
+16. `fig16_quantity_source_shares` (+ `fig16b` absolute) – quantity by source (purchased/own/gifts)
 17. `fig17_source_by_livestock` – quantity source split by livestock ownership
 18. `fig18_expenditure_by_livestock` – expenditure per AE by livestock ownership
 19. `fig19_quality_share` – quality's share of the expenditure elasticity by group

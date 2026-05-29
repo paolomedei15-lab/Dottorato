@@ -58,8 +58,8 @@ fig("fig6_household_composition.png")
 Means over consumers, at **adult-equivalent** level; unit value is the median.
 
 ```{r}
-kable(tab("02_item_summary.csv"), digits = c(0,1,2,0,2,0,0),
-      caption = "Item summary (household and per-adult-equivalent)")
+kable(tab("02_item_summary.csv"), digits = 2,
+      caption = "Item summary (household and per-adult-equivalent). Unit column shows kg / piece / litre.")
 ```
 
 ```{r, fig.show='hold', out.width="49%"}
@@ -74,7 +74,8 @@ kable(tab("02c_quantity_source.csv"), digits = 2,
 ```
 
 ```{r, fig.show='hold', out.width="49%"}
-fig("fig16_quantity_source.png"); fig("fig17_source_by_livestock.png")
+fig("fig16_quantity_source_shares.png"); fig("fig16b_quantity_source_abs.png")
+fig("fig17_source_by_livestock.png")
 ```
 
 Beef and pork are almost entirely **purchased**; **goat meat, chicken, eggs and
@@ -99,8 +100,8 @@ with fewer than 30 consumers are blanked. For rural/urban the welfare groups are
 defined **within area**.
 
 ```{r}
-kable(tab("04_top_bottom_ratios.csv"), digits = c(0,0,0,0,2,2,2),
-      caption = "Top/bottom ratios — quantity, expenditure, unit value")
+kable(tab("04_top_bottom_ratios.csv"), digits = 2,
+      caption = "Top/bottom ratios — quantity, expenditure, unit value (ratios are unit-free)")
 ```
 
 ```{r, fig.show='hold', out.width="49%"}

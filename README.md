@@ -65,15 +65,21 @@ Cox & Wohlgenant (1986); Gibson & Kim (quality and unit values). Because
 sample with the same regressors, OLS guarantees the additive identity
 `eps_expenditure = eps_quantity + eps_quality`.
 
-## Indicative results (from a validation run)
+## Indicative results (validation run, region-clustered SEs)
 
-- Household size ≈ 4.8; ≈ 66% rural; ≈ 48% own livestock.
-- Expenditure elasticities ≈ 0.44–0.59 (all < 1, as expected for animal foods).
-- **Quality elasticities positive and significant for every item** (≈ 0.05–0.15;
-  pooled ≈ 0.10, t ≈ 10): **H0 rejected — quality upgrading is present.**
-- Quality elasticity is **not significant in the poorest quintile but becomes
-  significant from the 2nd quintile upward and rises with income** — i.e.
-  quality starts to matter once households move above the bottom 20%.
+- Household size ≈ 4.8; ≈ 67% rural; ≈ 49% own livestock.
+- Expenditure elasticities ≈ 0.37–0.55 — these are **intensive-margin,
+  conditional-on-purchase** elasticities (below textbook unconditional ASF
+  values, which also include the decision to start consuming).
+- **Quality elasticities positive and significant for every item** (≈ 0.04–0.12;
+  pooled ≈ 0.08): **H0 rejected — quality upgrading is present.** Quantity is
+  the larger component (~80–88% of the expenditure response).
+- **No clean income threshold:** the quality elasticity is positive and
+  significant in *every* quintile (including the poorest) and is roughly flat,
+  so quality upgrading happens across the whole distribution rather than
+  switching on at a particular income.
+
+See `FINAL_REPORT.md` for the full write-up and the robustness checks.
 
 ## Figures produced (`output/figures/`)
 

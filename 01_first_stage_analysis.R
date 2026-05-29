@@ -429,6 +429,7 @@ group_means <- function(data, group_var, area = c("all", "rural", "urban")) {
     filter(!is.na(.data[[group_var]])) %>%
     group_by(item_label, group = .data[[group_var]]) %>%
     summarise(
+      n_obs      = sum(qty_total > 0 & is.finite(weight), na.rm = TRUE),
       qty_pae    = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight),
       exp_pae    = wmean(ifelse(exp > 0, exp_pae, NA),             weight),
       unit_value = wmedian(unit_value, weight),   # median: robust price measure
@@ -454,16 +455,21 @@ write.csv(group_tables, file.path(out_tab, "03_group_means.csv"), row.names = FA
 ## How much more do the richest 20% consume / spend / pay-per-unit relative to
 ## the poorest 20% ? Computed for All / Rural / Urban.
 
+## Small cells are unreliable: ratios are blanked when either Q1 or Q5 has
+## fewer than 30 consuming households (e.g. urban pork, urban eggs).
+min_cell <- 30
 q5q1_ratios <- group_tables %>%
   filter(grouping == "quintile", group %in% c("Q1", "Q5")) %>%
   pivot_wider(id_cols = c(item_label, area), names_from = group,
-              values_from = c(qty_pae, exp_pae, unit_value)) %>%
+              values_from = c(n_obs, qty_pae, exp_pae, unit_value)) %>%
   mutate(
-    qty_ratio_Q5_Q1  = qty_pae_Q5    / qty_pae_Q1,
-    exp_ratio_Q5_Q1  = exp_pae_Q5    / exp_pae_Q1,
-    uv_ratio_Q5_Q1   = unit_value_Q5 / unit_value_Q1
+    enough = pmin(n_obs_Q1, n_obs_Q5) >= min_cell,
+    qty_ratio_Q5_Q1  = ifelse(enough, qty_pae_Q5    / qty_pae_Q1,    NA_real_),
+    exp_ratio_Q5_Q1  = ifelse(enough, exp_pae_Q5    / exp_pae_Q1,    NA_real_),
+    uv_ratio_Q5_Q1   = ifelse(enough, unit_value_Q5 / unit_value_Q1, NA_real_),
+    n_min = pmin(n_obs_Q1, n_obs_Q5)
   ) %>%
-  select(item_label, area, qty_ratio_Q5_Q1, exp_ratio_Q5_Q1, uv_ratio_Q5_Q1)
+  select(item_label, area, n_min, qty_ratio_Q5_Q1, exp_ratio_Q5_Q1, uv_ratio_Q5_Q1)
 
 write.csv(q5q1_ratios, file.path(out_tab, "04_Q5_Q1_ratios.csv"), row.names = FALSE)
 print(q5q1_ratios)
@@ -545,9 +551,13 @@ est <- items %>%
     region = factor(region)
   )
 
-## One-sided test of H1: eps_quality > 0, with robust (HC1) standard errors.
+## Standard errors are clustered by REGION (allows spatial correlation; also
+## avoids the HC1 "singular hat value" warnings from sparse regions).
+vcov_cl <- function(m) vcovCL(m, cluster = model.frame(m)$region)
+
+## One-sided test of H1: eps_quality > 0, with region-clustered standard errors.
 one_sided_quality_test <- function(model) {
-  ct  <- coeftest(model, vcov = vcovHC(model, type = "HC1"))
+  ct  <- coeftest(model, vcov = vcov_cl(model))
   b   <- ct["ln_w", "Estimate"]
   se  <- ct["ln_w", "Std. Error"]
   tval <- b / se
@@ -562,7 +572,7 @@ estimate_item <- function(d) {
   m_q   <- lm(as.formula(paste("ln_q   ~", ctrl)), data = d)
   m_uv  <- lm(as.formula(paste("ln_uv  ~", ctrl)), data = d)
 
-  rob <- function(m) coeftest(m, vcov = vcovHC(m, type = "HC1"))["ln_w", "Estimate"]
+  rob <- function(m) coeftest(m, vcov = vcov_cl(m))["ln_w", "Estimate"]
   qtest <- one_sided_quality_test(m_uv)
 
   tibble(
@@ -585,11 +595,15 @@ elasticities <- est %>%
 
 ## Pooled across ALL items (item fixed effects + wave fixed effects):
 ## a single "overall" set of elasticities for animal-source foods.
+## NOTE: item fixed effects are essential here -- without them the pooled unit
+## value mixes cheap (eggs) and expensive (beef) items and the quality slope can
+## even turn negative. The per-item estimates above are the primary results; the
+## pooled row is only a compact summary.
 est_pooled <- est %>% mutate(item = factor(item))
 m_exp_p <- lm(ln_exp ~ ln_w + ln_ae + rural + wave + region + item, data = est_pooled)
 m_q_p   <- lm(ln_q   ~ ln_w + ln_ae + rural + wave + region + item, data = est_pooled)
 m_uv_p  <- lm(ln_uv  ~ ln_w + ln_ae + rural + wave + region + item, data = est_pooled)
-rob_coef <- function(m) coeftest(m, vcov = vcovHC(m, type = "HC1"))["ln_w", "Estimate"]
+rob_coef <- function(m) coeftest(m, vcov = vcov_cl(m))["ln_w", "Estimate"]
 qtest_p  <- one_sided_quality_test(m_uv_p)
 
 pooled_row <- tibble(
@@ -630,27 +644,22 @@ ggsave(file.path(out_fig, "fig4_elasticity_decomposition.png"), g_elas, width = 
 
 
 ## ============================================================================
-## 10. AT WHICH INCOME LEVEL DOES QUALITY START TO MATTER?
+## 10. DOES QUALITY MATTER MORE AS INCOME RISES?
 ## ============================================================================
-## Two complementary answers.
-##
-## (A) Quality elasticity BY WELFARE QUINTILE: re-estimate the unit-value
-##     equation allowing a separate ln_w slope per quintile. The first quintile
-##     whose quality elasticity is significantly positive marks the income
-##     range where quality upgrading "switches on". We report the average real
-##     expenditure per AE of that quintile as the threshold income.
-##
-## (B) A continuous turning point from a QUADRATIC unit-value Engel curve:
-##         ln_uv = a + b1*ln_w + b2*ln_w^2 + controls
-##     local quality elasticity = b1 + 2*b2*ln_w; setting it to zero gives
-##         ln_w* = -b1 / (2*b2)   ->   W* = exp(ln_w*)
-##     (meaningful as a "quality switches on" point when b2 > 0).
+## We let the quality elasticity vary by welfare quintile (a separate ln_w slope
+## per quintile, pooled across items with item + wave fixed effects). NOTE: this
+## is NOT a clean "threshold" exercise -- estimating an income slope WITHIN a
+## quintile uses exactly the income variation a quintile compresses, so the
+## quintile-specific slopes are noisy. Read them as "is quality upgrading present
+## at this income level?" rather than as a precise switch-on point. We also
+## report quality's SHARE of the total expenditure elasticity by quintile, which
+## is the more interpretable "how much does quality matter" measure.
 
-## ---- (A) By-quintile quality elasticity (pooled across items) --------------
+## ---- (A) Quality elasticity by welfare quintile (pooled across items) ------
 est_q <- est_pooled %>% filter(!is.na(quintile)) %>% mutate(quintile = factor(quintile))
 m_uv_byq <- lm(ln_uv ~ quintile + quintile:ln_w + ln_ae + rural + wave + region + item,
                data = est_q)
-ctq <- coeftest(m_uv_byq, vcov = vcovHC(m_uv_byq, type = "HC1"))
+ctq <- coeftest(m_uv_byq, vcov = vcov_cl(m_uv_byq))
 
 # pull the quintile-specific ln_w slopes
 slope_rows <- grep("ln_w", rownames(ctq), value = TRUE)
@@ -668,47 +677,59 @@ write.csv(quality_by_quintile, file.path(out_tab, "06_quality_by_quintile.csv"),
 cat("\n==== Quality elasticity by welfare quintile (within-wave quintiles) ====\n")
 print(as.data.frame(quality_by_quintile), digits = 3)
 
-first_pos <- quality_by_quintile %>% filter(positive_sig) %>% slice(1)
-if (nrow(first_pos) > 0)
-  cat(sprintf("\nQuality upgrading becomes significant from quintile %s upward.\n",
-              first_pos$quintile))
+## CHECK result: the quality elasticity is positive and significant in EVERY
+## quintile (including Q1) and is roughly flat / mildly U-shaped, not increasing
+## from a threshold. So there is NO clean income level at which quality "switches
+## on": quality upgrading is present across the whole distribution.
+n_sig <- sum(quality_by_quintile$positive_sig, na.rm = TRUE)
+cat(sprintf("\nQuality elasticity is significantly > 0 in %d of 5 quintiles -> ", n_sig))
+cat("quality upgrading is present across the distribution (no single threshold).\n")
 
-## Monetary interpretation: because welfare levels differ across waves, we give
-## the mean real expenditure per AE of each quintile SEPARATELY by wave.
+## Reference: mean real expenditure per AE by quintile and wave (levels differ
+## across waves -- see Section 6).
 q_income_by_wave <- household %>%
   filter(!is.na(quintile)) %>%
   group_by(wave, quintile) %>%
   summarise(mean_welfare_pae = wmean(welfare_pae, weight),
             .groups = "drop")
 write.csv(q_income_by_wave, file.path(out_tab, "07_quintile_income_by_wave.csv"), row.names = FALSE)
-cat("\nMean real expenditure per AE by quintile and wave (units differ across waves):\n")
-print(as.data.frame(q_income_by_wave), digits = 6)
 
-## ---- (B) Threshold income tied to the by-quintile test ---------------------
-## The first quintile with a significantly positive quality elasticity marks the
-## income range where quality upgrading switches on. We report the income (real
-## expenditure per AE) at the LOWER boundary of that quintile, separately by wave
-## (welfare levels are wave-specific).
-##
-## NOTE: a continuous quadratic-Engel-curve turning point (W* = exp(-b1/2b2))
-## was tested but is unstable here -- it is driven by curvature outside the data
-## range and returns implausible values. The quantile-based threshold below is
-## robust and directly interpretable, so we use it instead.
-if (nrow(first_pos) > 0) {
-  k <- as.integer(str_extract(first_pos$quintile, "[0-9]"))   # e.g. "Q2" -> 2
-  prob_lower <- (k - 1) / 5                                   # lower bound of that quintile
-  thresholds <- household %>%
-    filter(!is.na(welfare_pae)) %>%
-    group_by(wave) %>%
-    summarise(threshold_welfare_pae = wtd_quantile(welfare_pae, weight, prob_lower),
-              .groups = "drop") %>%
-    mutate(first_significant_quintile = first_pos$quintile)
-  write.csv(thresholds, file.path(out_tab, "08_quality_threshold_income.csv"), row.names = FALSE)
-  cat(sprintf("\n==== Income at which quality starts to matter (from quintile %s) ====\n",
-              first_pos$quintile))
-  cat("Threshold = real expenditure per AE at the lower edge of that quintile, by wave:\n")
-  print(as.data.frame(thresholds), digits = 6)
-}
+## ---- (B) Quality SHARE of the expenditure elasticity, by quintile ----------
+## Let BOTH the expenditure and unit-value slopes vary by quintile; the share
+## eps_quality / eps_expenditure says how much of the income response is quality.
+m_ex_byq <- lm(ln_exp ~ quintile + quintile:ln_w + ln_ae + rural + wave + region + item,
+               data = est_q)
+ex_slopes <- coef(m_ex_byq)[grep("ln_w", names(coef(m_ex_byq)))]
+uv_slopes <- coef(m_uv_byq)[grep("ln_w", names(coef(m_uv_byq)))]
+quality_share <- tibble(
+  quintile        = str_extract(names(ex_slopes), "Q[1-5]"),
+  eps_expenditure = as.numeric(ex_slopes),
+  eps_quality     = as.numeric(uv_slopes)
+) %>%
+  mutate(quality_share_pct = 100 * eps_quality / eps_expenditure) %>%
+  arrange(quintile)
+write.csv(quality_share, file.path(out_tab, "08_quality_share_by_quintile.csv"), row.names = FALSE)
+cat("\n==== Quality share of the expenditure elasticity, by quintile ====\n")
+print(as.data.frame(quality_share), digits = 3)
+
+## ---- (C) Robustness: elasticities estimated separately by wave -------------
+## If pooling is valid the per-wave elasticities should be similar.
+by_wave <- map_dfr(levels(est$wave), function(wv) {
+  d <- filter(est_pooled, wave == wv) %>% mutate(item = droplevels(item))
+  fx <- "ln_w + ln_ae + rural + region + item"
+  tibble(
+    wave            = wv, n = nrow(d),
+    eps_expenditure = coeftest(lm(as.formula(paste("ln_exp ~", fx)), d),
+                               vcov = vcov_cl)["ln_w", "Estimate"],
+    eps_quantity    = coeftest(lm(as.formula(paste("ln_q ~", fx)), d),
+                               vcov = vcov_cl)["ln_w", "Estimate"],
+    eps_quality     = coeftest(lm(as.formula(paste("ln_uv ~", fx)), d),
+                               vcov = vcov_cl)["ln_w", "Estimate"]
+  )
+})
+write.csv(by_wave, file.path(out_tab, "09_elasticities_by_wave.csv"), row.names = FALSE)
+cat("\n==== Robustness: elasticities by wave (should be similar if pooling is OK) ====\n")
+print(as.data.frame(by_wave), digits = 3)
 
 ## ---- Graph: quality elasticity across quintiles ----------------------------
 g_q <- ggplot(quality_by_quintile, aes(quintile, eps_quality)) +
@@ -719,7 +740,7 @@ g_q <- ggplot(quality_by_quintile, aes(quintile, eps_quality)) +
   scale_fill_manual(values = c(`TRUE` = "steelblue", `FALSE` = "grey70"),
                     name = "Quality elasticity\nsignificant (> 0)") +
   labs(title = "Quality elasticity by welfare quintile",
-       subtitle = "When does quality upgrading switch on as income rises?",
+       subtitle = "Positive and significant in every quintile: quality upgrading across the whole distribution",
        x = "Welfare quintile (real expenditure per adult equivalent)",
        y = "Quality elasticity (eps_quality)")
 ggsave(file.path(out_fig, "fig5_quality_by_quintile.png"), g_q, width = 8, height = 5, dpi = 150)

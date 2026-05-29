@@ -726,7 +726,132 @@ ggsave(file.path(out_fig, "fig5_quality_by_quintile.png"), g_q, width = 8, heigh
 
 
 ## ============================================================================
-## 11. DONE
+## 11. ADDITIONAL DESCRIPTIVE & DIAGNOSTIC FIGURES
+## ============================================================================
+## A broader set of figures covering household structure, participation,
+## quantity / expenditure / unit-value gradients (quintiles, quartiles,
+## terciles), rural vs urban comparisons, Engel curves and the quality test.
+
+## ---- fig6. Household composition by wave -----------------------------------
+hh_comp <- hh_summary %>%
+  filter(wave != "Pooled") %>%
+  select(wave, `Rural %` = pct_rural, `Urban %` = pct_urban,
+         `Owns livestock %` = pct_livestock) %>%
+  pivot_longer(-wave, names_to = "indicator", values_to = "pct")
+g6 <- ggplot(hh_comp, aes(wave, pct, fill = indicator)) +
+  geom_col(position = position_dodge()) +
+  labs(title = "Household composition by wave", x = NULL, y = "%", fill = NULL)
+ggsave(file.path(out_fig, "fig6_household_composition.png"), g6, width = 8, height = 5, dpi = 150)
+
+## ---- fig7. Participation: share of households consuming each item ----------
+g7 <- ggplot(item_summary, aes(reorder(item_label, pct_consuming), pct_consuming)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Share of households consuming each item (pooled)",
+       x = NULL, y = "% consuming in the past 7 days")
+ggsave(file.path(out_fig, "fig7_participation.png"), g7, width = 8, height = 5, dpi = 150)
+
+## ---- fig8. Quantity per adult equivalent by welfare quintile ---------------
+qty_by_q <- group_tables %>% filter(grouping == "quintile", area == "all")
+g8 <- ggplot(qty_by_q, aes(group, qty_pae, colour = item_label, group = item_label)) +
+  geom_line() + geom_point() +
+  labs(title = "Quantity per adult equivalent by welfare quintile",
+       x = "Welfare quintile", y = "Quantity per AE (kg / litre / pieces, 7 days)",
+       colour = NULL)
+ggsave(file.path(out_fig, "fig8_quantity_quintiles.png"), g8, width = 9, height = 5, dpi = 150)
+
+## ---- fig9. Expenditure per adult equivalent by welfare quintile ------------
+exp_by_q <- group_tables %>% filter(grouping == "quintile", area == "all")
+g9 <- ggplot(exp_by_q, aes(group, exp_pae, colour = item_label, group = item_label)) +
+  geom_line() + geom_point() +
+  labs(title = "Expenditure per adult equivalent by welfare quintile",
+       x = "Welfare quintile", y = "Expenditure per AE (TSH, 7 days)", colour = NULL)
+ggsave(file.path(out_fig, "fig9_expenditure_quintiles.png"), g9, width = 9, height = 5, dpi = 150)
+
+## ---- fig10. Q5/Q1 ratios, faceted by area (all / rural / urban) ------------
+ratio_all_areas <- q5q1_ratios %>%
+  pivot_longer(c(qty_ratio_Q5_Q1, exp_ratio_Q5_Q1, uv_ratio_Q5_Q1),
+               names_to = "measure", values_to = "ratio") %>%
+  mutate(measure = recode(measure,
+                          qty_ratio_Q5_Q1 = "Quantity",
+                          exp_ratio_Q5_Q1 = "Expenditure",
+                          uv_ratio_Q5_Q1  = "Unit value"))
+g10 <- ggplot(ratio_all_areas, aes(item_label, ratio, fill = measure)) +
+  geom_col(position = position_dodge()) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  facet_wrap(~ area, ncol = 1) +
+  labs(title = "Q5 / Q1 ratios by item and area", x = NULL, y = "Q5 / Q1 ratio", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+ggsave(file.path(out_fig, "fig10_Q5Q1_by_area.png"), g10, width = 9, height = 9, dpi = 150)
+
+## ---- fig11. Rural vs urban: quantity and expenditure per AE ----------------
+ru_qexp <- group_tables %>%
+  filter(grouping == "quintile", area %in% c("rural", "urban")) %>%
+  group_by(item_label, area) %>%
+  summarise(Quantity = mean(qty_pae, na.rm = TRUE),
+            Expenditure = mean(exp_pae, na.rm = TRUE), .groups = "drop") %>%
+  pivot_longer(c(Quantity, Expenditure), names_to = "measure", values_to = "value")
+g11 <- ggplot(ru_qexp, aes(item_label, value, fill = area)) +
+  geom_col(position = position_dodge()) +
+  facet_wrap(~ measure, scales = "free_y") +
+  labs(title = "Rural vs urban: quantity and expenditure per adult equivalent",
+       x = NULL, y = NULL, fill = NULL) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+ggsave(file.path(out_fig, "fig11_rural_urban_qty_exp.png"), g11, width = 10, height = 5, dpi = 150)
+
+## ---- fig12. Engel curves: ln(expenditure) vs ln(welfare), by item ----------
+## Slope of each line is (close to) the expenditure elasticity. Coloured by wave
+## because welfare levels differ across waves (see Section 6).
+g12 <- ggplot(est, aes(ln_w, ln_exp, colour = wave)) +
+  geom_point(alpha = 0.12, size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ item_label, scales = "free") +
+  labs(title = "Engel curves: log expenditure vs log welfare per AE",
+       x = "log(real expenditure per AE)", y = "log(item expenditure)", colour = NULL)
+ggsave(file.path(out_fig, "fig12_engel_curves.png"), g12, width = 10, height = 6, dpi = 150)
+
+## ---- fig13. Quality gradient: ln(unit value) vs ln(welfare), by item -------
+## Slope is the quality elasticity; a positive slope is quality upgrading.
+g13 <- ggplot(est, aes(ln_w, ln_uv, colour = wave)) +
+  geom_point(alpha = 0.12, size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ item_label, scales = "free") +
+  labs(title = "Quality gradient: log unit value vs log welfare per AE",
+       x = "log(real expenditure per AE)", y = "log(unit value)", colour = NULL)
+ggsave(file.path(out_fig, "fig13_quality_gradient.png"), g13, width = 10, height = 6, dpi = 150)
+
+## ---- fig14. Unit value across quintiles, quartiles and terciles ------------
+uv_groups <- group_tables %>% filter(area == "all") %>%
+  mutate(grouping = recode(grouping, quintile = "Quintiles",
+                           quartile = "Quartiles", tercile = "Terciles"))
+g14 <- ggplot(uv_groups, aes(group, unit_value, colour = item_label, group = item_label)) +
+  geom_line() + geom_point() +
+  facet_wrap(~ grouping, scales = "free_x") +
+  labs(title = "Unit value (quality) gradient across welfare groups",
+       x = "Welfare group (poor -> rich)", y = "Median unit value (TSH per std unit)",
+       colour = NULL)
+ggsave(file.path(out_fig, "fig14_unitvalue_groups.png"), g14, width = 11, height = 5, dpi = 150)
+
+## ---- fig15. Quality elasticity by item with 95% CI (forest plot) -----------
+## Visual of the hypothesis test H0: eps_quality = 0. Points right of the dashed
+## line with a CI that clears zero reject H0 (quality upgrading).
+elas_ci <- elasticities %>%
+  mutate(lo = eps_quality - 1.96 * quality_se,
+         hi = eps_quality + 1.96 * quality_se,
+         pooled = item_label == "ALL ITEMS (pooled)")
+g15 <- ggplot(elas_ci, aes(eps_quality, reorder(item_label, eps_quality))) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.2) +
+  geom_point(aes(colour = pooled), size = 2.5) +
+  scale_colour_manual(values = c(`FALSE` = "black", `TRUE` = "firebrick"), guide = "none") +
+  labs(title = "Quality elasticity by item (95% CI)",
+       subtitle = "H0: quality elasticity = 0  vs  H1: > 0 (pooled estimate in red)",
+       x = "Quality elasticity (eps_quality)", y = NULL)
+ggsave(file.path(out_fig, "fig15_quality_forest.png"), g15, width = 8, height = 5, dpi = 150)
+
+
+## ============================================================================
+## 12. DONE
 ## ============================================================================
 cat("\nAll tables saved to:", normalizePath(out_tab), "\n")
 cat("All figures saved to:", normalizePath(out_fig), "\n")

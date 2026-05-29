@@ -75,6 +75,24 @@ sample with the same regressors, OLS guarantees the additive identity
   significant from the 2nd quintile upward and rises with income** — i.e.
   quality starts to matter once households move above the bottom 20%.
 
+## Figures produced (`output/figures/`)
+
+1. `fig1_Q5Q1_ratios` – Q5/Q1 ratios by item (quantity, expenditure, unit value)
+2. `fig2_unitvalue_quintiles` – unit-value gradient across quintiles
+3. `fig3_rural_urban_unitvalue` – rural vs urban unit value
+4. `fig4_elasticity_decomposition` – expenditure elasticity split into quantity + quality
+5. `fig5_quality_by_quintile` – quality elasticity by quintile (when quality switches on)
+6. `fig6_household_composition` – rural/urban/livestock shares by wave
+7. `fig7_participation` – share of households consuming each item
+8. `fig8_quantity_quintiles` – quantity per AE across quintiles
+9. `fig9_expenditure_quintiles` – expenditure per AE across quintiles
+10. `fig10_Q5Q1_by_area` – Q5/Q1 ratios faceted by all / rural / urban
+11. `fig11_rural_urban_qty_exp` – rural vs urban quantity and expenditure per AE
+12. `fig12_engel_curves` – Engel curves (log expenditure vs log welfare) by item
+13. `fig13_quality_gradient` – log unit value vs log welfare by item (quality slope)
+14. `fig14_unitvalue_groups` – unit-value gradient across quintiles, quartiles, terciles
+15. `fig15_quality_forest` – quality elasticity by item with 95% CI (hypothesis test)
+
 ## How to run
 
 ```r

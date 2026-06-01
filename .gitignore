@@ -1,4 +1,5 @@
-output/
+results.xlsx
+figures/
 .Rhistory
 .RData
 .Rproj.user/

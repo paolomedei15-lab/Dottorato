@@ -17,14 +17,18 @@ source("analysis.R")
 
 It produces:
 
-- **`results.xlsx`** — one workbook with eight sheets:
-  `Households`, `Items overall`, `By quartile`, `Q4 over Q1`, `By rural-urban`,
-  `By livestock`, `Quantity source`, `Elasticities`.
-- **`figures/`** — four figures:
-  1. `fig1_Q4_Q1_ratios` — Q4/Q1 quantity vs value vs unit value (the hypothesis)
-  2. `fig2_elasticity_decomposition` — expenditure elasticity = quantity + quality
-  3. `fig3_quantity_by_quartile` — quantity per adult equivalent rises with income
-  4. `fig4_unitvalue_by_quartile` — unit value (quality) rises with income
+- **`results.xlsx`** — one workbook (sheets: `Households`, `Items overall`,
+  `By quartile`, `Q4 over Q1`, `By rural-urban`, `By livestock`,
+  `Quantity source`, `Budget composition`, `Elasticities`, `Elasticity subgroups`).
+- **`figures/`** — 14 charts, all showing the six items **together** (different
+  units are made comparable with indices, Q1 = 100, and logs):
+  - Descriptive: 01 participation · 02 participation rural/urban ·
+    03 quantity index · 04 value index · 05 unit-value (quality) index ·
+    06 purchased share (market integration) · 07 quantity source ·
+    08 budget composition.
+  - Elasticities: 09 Q4/Q1 ratios · 10 decomposition (quantity + quality) ·
+    11 quality elasticity with 95% CI (the test) · 12 quality share ·
+    13 quality by subgroup (rural/urban, livestock, wave) · 14 quality gradient.
 
 ## Method notes
 

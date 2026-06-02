@@ -23,12 +23,12 @@ products shown together; different units made comparable with indices and logs).
 |---|---|---|
 | 1 | Sample descriptive statistics (full / urban-rural / livestock) | sheet `1_Sample` |
 | 2 | Product-level descriptive statistics | sheet `2_Products`, fig `01_participation` |
-| 3 | Consumption trends across survey waves | sheet `3_Consumption_by_wave`, fig `03` |
+| 3 | Consumption trends across survey waves | sheet `3_Consumption_by_wave`, figs `03`, `03b` (expenditure) |
 | 4 | Urban–rural consumption patterns | sheet `4_Urban_rural`, fig `04` |
 | 5 | Sources of food consumption (purchase / own / gifts) | sheet `5_Sources`, fig `05` |
 | 6 | Consumption by income quartile (line) | fig `06_consumption_by_quartile` |
 | 7 | Expenditure by income quartile (line) | fig `07_expenditure_by_quartile` |
-| 8 | Consumption vs expenditure (six panels) | fig `08_consumption_vs_expenditure_panels` |
+| 8 | Consumption vs expenditure (six panels, + unit value) | figs `08_…panels`, `08b_focus_fresh_milk` |
 | 9 | Inequality ratios Q4/Q1 (quantity, expenditure, unit value) | sheet `9_Inequality_ratios`, fig `09` |
 | 10 | Quantity vs expenditure elasticities | sheet `10_11_Elasticities`, fig `10` |
 | 11 | The quality effect (the wedge) | sheet `10_11_Elasticities`, fig `11_quality_effect` |
@@ -45,6 +45,10 @@ products shown together; different units made comparable with indices and logs).
   outliers trimmed (1st–99th percentile within item×wave).
 - Consumption is valued at the unit price (own production at the item's median
   price) so quantity and expenditure are on the same basis.
+- Across waves, **quantity per AE is flat** (consumption is stable); nominal
+  expenditure rises with inflation. The deflated **income** measure is on a
+  wave-specific base, so its *level* is ~10× lower in Wave 5 — this is why
+  quartiles are built within wave and does **not** mean consumption fell.
 - Elasticities: Deaton unit-value method — OLS of log quantity, expenditure and
   unit value on log income per AE + log adult eq + urban + wave; HC1 robust SE.
 - Heterogeneity (point 13): income is interacted with the urban and livestock

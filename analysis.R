@@ -123,9 +123,13 @@ dat <- bind_rows(rows) %>% mutate(label = factor(label, levels = item_order))
 dat <- dat %>% group_by(item, wave) %>%
   mutate(across(c(qty_total, qty_pur, qty_own, qty_gift, exp), trim),
          unit_value = ifelse(qty_pur > 0 & exp > 0, exp/qty_pur, NA_real_),
-         price = ifelse(is.finite(unit_value), unit_value, w_median(unit_value, weight))) %>%
+         price = ifelse(is.finite(unit_value), unit_value, w_median(unit_value, weight)),
+         # value = quantity x price; trim it too (the product of two trimmed
+         # variables can still have extreme outliers — this caused the absurd
+         # beef Q3 spike) so its mean is well behaved.
+         value = trim(qty_total * price)) %>%
   ungroup() %>%
-  mutate(qty_pae = qty_total/adulteq, value = qty_total*price, value_pae = value/adulteq,
+  mutate(qty_pae = qty_total/adulteq, value_pae = value/adulteq,
          purch_share = ifelse(qty_total > 0, qty_pur/qty_total, NA_real_))
 
 add_q <- function(d) d %>% group_by(wave) %>%
@@ -297,6 +301,21 @@ p <- cons_wave %>% group_by(Item) %>% arrange(Wave) %>%
        y="Quantity per AE (index)", colour=NULL)
 gg("03_consumption_by_wave.png", p)
 
+## (3b) expenditure across waves — to see how spending moves over time.
+## NOTE: this is NOMINAL value per AE (prices not deflated), so the rise is
+## largely inflation. CONSUMPTION (quantity, fig 03) is flat across waves.
+## The household INCOME measure is deflated to a wave-specific base, so its
+## LEVEL is ~10x lower in Wave 5 — that is why income quartiles are built within
+## wave, and it does NOT mean consumption fell.
+p <- cons_wave %>% group_by(Item) %>% arrange(Wave) %>%
+  mutate(Index = 100*`Value/AE`/first(na.omit(`Value/AE`))) %>% ungroup() %>% ord() %>%
+  ggplot(aes(Wave, Index, colour=Item, group=Item)) + geom_line(linewidth=1) + geom_point() +
+  scale_colour_manual(values=pal) +
+  labs(title="3b. Expenditure across survey waves",
+       subtitle="Nominal value per AE, index Wave 3 = 100 (the rise is mostly inflation)",
+       x="Survey wave", y="Expenditure per AE (index)", colour=NULL)
+gg("03b_expenditure_by_wave.png", p)
+
 ## (4) urban vs rural consumption (value per AE, same TSH unit -> comparable)
 p <- tab4_urban_rural %>% ord() %>%
   ggplot(aes(Item, `Value/AE (TSH)`, fill=Area)) + geom_col(position="dodge") +
@@ -330,18 +349,35 @@ p <- byq %>% filter(N_cons>=30) %>% idx("Value/AE (TSH)") %>% ord() %>%
        x="Income quartile (poor → rich)", y="Expenditure per AE (index)", colour=NULL)
 gg("07_expenditure_by_quartile.png", p)
 
-## (8) consumption vs expenditure, six panels (the quality wedge per product)
-p <- byq %>% filter(N_cons>=30) %>% group_by(Item) %>% arrange(Q) %>%
-  mutate(Quantity   = 100*`Quantity/AE`/first(na.omit(`Quantity/AE`)),
-         Expenditure= 100*`Value/AE (TSH)`/first(na.omit(`Value/AE (TSH)`))) %>% ungroup() %>%
-  select(Item, Q, Quantity, Expenditure) %>%
-  pivot_longer(c(Quantity, Expenditure), names_to="Measure", values_to="Index") %>% ord() %>%
+## (8) quantity, expenditure AND unit value, six panels (the quality wedge)
+## Three indexed lines per product: expenditure = quantity + quality (unit value).
+mk_index <- byq %>% filter(N_cons>=30) %>% group_by(Item) %>% arrange(Q) %>%
+  mutate(Quantity     = 100*`Quantity/AE`/first(na.omit(`Quantity/AE`)),
+         Expenditure  = 100*`Value/AE (TSH)`/first(na.omit(`Value/AE (TSH)`)),
+         `Unit value` = 100*`Unit value (TSH)`/first(na.omit(`Unit value (TSH)`))) %>% ungroup()
+p <- mk_index %>%
+  select(Item, Q, Quantity, Expenditure, `Unit value`) %>%
+  pivot_longer(c(Quantity, Expenditure, `Unit value`), names_to="Measure", values_to="Index") %>%
+  mutate(Measure=factor(Measure, levels=c("Expenditure","Quantity","Unit value"))) %>% ord() %>%
   ggplot(aes(Q, Index, colour=Measure, group=Measure)) + geom_line(linewidth=1) + geom_point() +
-  facet_wrap(~ Item) +
-  labs(title="8. Consumption vs expenditure across income quartiles",
-       subtitle="Index, poorest quartile = 100. Expenditure (orange) rises above quantity = quality wedge",
-       x="Income quartile (poor → rich)", y="Index (Q1 = 100)", colour=NULL)
-gg("08_consumption_vs_expenditure_panels.png", p, 10, 6)
+  facet_wrap(~ Item, scales="free_y") +
+  scale_colour_manual(values=c(Expenditure="#D55E00", Quantity="#0072B2", `Unit value`="#009E73")) +
+  labs(title="8. Quantity, expenditure and unit value across income quartiles",
+       subtitle="Index, poorest quartile = 100. Expenditure (red) = quantity (blue) + unit value/quality (green)",
+       x="Income quartile (poor → rich)", y="Index (poorest quartile = 100)", colour=NULL)
+gg("08_consumption_vs_expenditure_panels.png", p, 11, 6)
+
+## (8b) FOCUS on fresh milk — quantity, expenditure and unit value
+p <- mk_index %>% filter(Item=="Fresh milk") %>%
+  select(Q, Quantity, Expenditure, `Unit value`) %>%
+  pivot_longer(-Q, names_to="Measure", values_to="Index") %>%
+  mutate(Measure=factor(Measure, levels=c("Expenditure","Quantity","Unit value"))) %>%
+  ggplot(aes(Q, Index, colour=Measure, group=Measure)) + geom_line(linewidth=1.2) + geom_point(size=2.5) +
+  scale_colour_manual(values=c(Expenditure="#D55E00", Quantity="#0072B2", `Unit value`="#009E73")) +
+  labs(title="Focus — Fresh milk: quantity, expenditure and quality by income quartile",
+       subtitle="Index, poorest quartile = 100. The expenditure–quantity gap is the unit value (quality)",
+       x="Income quartile (poor → rich)", y="Index (poorest quartile = 100)", colour=NULL)
+gg("08b_focus_fresh_milk.png", p, 8, 5)
 
 ## (9) inequality ratios Q4/Q1
 p <- tab9_ratio %>% pivot_longer(-Item, names_to="Measure", values_to="Ratio") %>% ord() %>%

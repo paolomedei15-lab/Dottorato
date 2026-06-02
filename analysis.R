@@ -140,240 +140,255 @@ dat <- dat %>% group_by(wave, hhid) %>%
 
 
 ## ===========================================================================
-## 4. DESCRIPTIVE TABLES
+## 4. DESCRIPTIVE TABLES  (outline points 1-5)
 ## ===========================================================================
 hh1 <- distinct(dat, wave, hhid, .keep_all = TRUE)
-tab_hh <- bind_rows(
-  hh1 %>% group_by(Wave = wave) %>% summarise(Households=n(),
-     `HH size`=w_mean(hhsize,weight), `Adult eq.`=w_mean(adulteq,weight),
-     `Rural %`=100*w_mean(1-urban,weight), `Urban %`=100*w_mean(urban,weight),
-     `Livestock %`=100*w_mean(livestock,weight), .groups="drop"),
-  hh1 %>% summarise(Wave="Pooled", Households=n(),
-     `HH size`=w_mean(hhsize,weight), `Adult eq.`=w_mean(adulteq,weight),
-     `Rural %`=100*w_mean(1-urban,weight), `Urban %`=100*w_mean(urban,weight),
-     `Livestock %`=100*w_mean(livestock,weight)))
 
+## (1) Sample descriptive statistics: full sample + urban/rural + livestock
+samp <- function(d, name) d %>% summarise(Group = name, Households = n(),
+  `HH size` = w_mean(hhsize, weight), `Adult eq.` = w_mean(adulteq, weight),
+  `Rural %` = 100*w_mean(1-urban, weight), `Livestock %` = 100*w_mean(livestock, weight),
+  `Welfare per AE` = w_mean(welfare, weight))
+tab1_sample <- bind_rows(
+  samp(hh1, "Full sample"),
+  samp(filter(hh1, urban == 0), "Rural"),
+  samp(filter(hh1, urban == 1), "Urban"),
+  samp(filter(hh1, livestock == 1), "Owns livestock"),
+  samp(filter(hh1, livestock == 0), "No livestock"))
+
+## (2) Product-level descriptive statistics
 istats <- function(d) d %>% summarise(
-  `% consuming`=100*w_mean(as.numeric(qty_total>0),weight),
-  `Quantity/AE`=w_mean(ifelse(qty_total>0,qty_pae,NA),weight),
-  `Value/AE (TSH)`=w_mean(ifelse(qty_total>0,value_pae,NA),weight),
-  `Unit value (TSH)`=w_median(unit_value,weight),
-  `Purchased %`=100*w_mean(purch_share,weight),
-  N_cons=sum(qty_total>0,na.rm=TRUE), N_buy=sum(is.finite(unit_value)), .groups="drop")
+  `% consuming`     = 100*w_mean(as.numeric(qty_total>0), weight),
+  `Quantity/AE`     = w_mean(ifelse(qty_total>0, qty_pae, NA), weight),
+  `Value/AE (TSH)`  = w_mean(ifelse(qty_total>0, value_pae, NA), weight),
+  `Unit value (TSH)`= w_median(unit_value, weight),
+  `Purchased %`     = 100*w_mean(purch_share, weight),
+  N_cons = sum(qty_total>0, na.rm=TRUE), N_buy = sum(is.finite(unit_value)), .groups="drop")
+tab2_products <- dat %>% group_by(Item = label, Unit = unit) %>% istats()
 
-tab_items <- dat %>% group_by(Item=label, Unit=unit) %>% istats()
-byq       <- dat %>% filter(!is.na(q)) %>% group_by(Item=label, Unit=unit, Q=q) %>% istats()
-tab_area  <- dat %>% mutate(Area=ifelse(urban==1,"Urban","Rural")) %>% group_by(Item=label, Area) %>% istats()
-tab_live  <- dat %>% mutate(L=ifelse(livestock==1,"Owns livestock","No livestock")) %>% group_by(Item=label, Livestock=L) %>% istats()
+## per item × quartile (used for ratios and several figures)
+byq <- dat %>% filter(!is.na(q)) %>% group_by(Item = label, Unit = unit, Q = q) %>% istats()
 
-# Q4/Q1 ratios (quantity & value need >=30 consumers; unit value >=30 buyers)
-tab_ratio <- byq %>% filter(Q %in% c("Q1","Q4")) %>%
+## (3) Consumption trends across survey waves (quantity per AE)
+cons_wave <- dat %>% group_by(Item = label, Wave = wave) %>%
+  summarise(`Quantity/AE` = w_mean(ifelse(qty_total>0, qty_pae, NA), weight),
+            `Value/AE` = w_mean(ifelse(qty_total>0, value_pae, NA), weight), .groups="drop")
+tab3_wave <- cons_wave %>% select(Item, Wave, `Quantity/AE`) %>%
+  pivot_wider(names_from = Wave, values_from = `Quantity/AE`)
+
+## (4) Urban-rural consumption patterns
+tab4_urban_rural <- dat %>% mutate(Area = ifelse(urban==1,"Urban","Rural")) %>%
+  group_by(Item = label, Area) %>% istats()
+
+## (5) Sources of consumption (shares of total quantity).
+## NOTE: the survey records only purchases, own production and gifts/transfers;
+## there is no separate "other" source, so it is omitted.
+tab5_sources <- dat %>% filter(qty_total>0) %>% group_by(Item = label) %>% summarise(
+  `Purchased %`      = 100*w_mean(qty_pur, weight)/w_mean(qty_pur+qty_own+qty_gift, weight),
+  `Own production %` = 100*w_mean(qty_own, weight)/w_mean(qty_pur+qty_own+qty_gift, weight),
+  `Gifts/transfers %`= 100*w_mean(qty_gift, weight)/w_mean(qty_pur+qty_own+qty_gift, weight),
+  .groups="drop")
+
+## (9) Inequality ratios Q4/Q1 (quantity, expenditure, unit value)
+tab9_ratio <- byq %>% filter(Q %in% c("Q1","Q4")) %>%
   select(Item, Q, q=`Quantity/AE`, v=`Value/AE (TSH)`, u=`Unit value (TSH)`, nc=N_cons, nb=N_buy) %>%
-  pivot_wider(names_from=Q, values_from=c(q,v,u,nc,nb)) %>%
+  pivot_wider(names_from = Q, values_from = c(q,v,u,nc,nb)) %>%
   transmute(Item,
-    `Quantity Q4/Q1` = ifelse(pmin(nc_Q1,nc_Q4)>=30, q_Q4/q_Q1, NA),
-    `Value Q4/Q1`    = ifelse(pmin(nc_Q1,nc_Q4)>=30, v_Q4/v_Q1, NA),
-    `Unit value Q4/Q1`=ifelse(pmin(nb_Q1,nb_Q4)>=30, u_Q4/u_Q1, NA))
-
-# source of quantity, shares of total
-tab_source <- dat %>% filter(qty_total>0) %>% group_by(Item=label) %>% summarise(
-  `Purchased %`=100*w_mean(qty_pur,weight)/w_mean(qty_pur+qty_own+qty_gift,weight),
-  `Own production %`=100*w_mean(qty_own,weight)/w_mean(qty_pur+qty_own+qty_gift,weight),
-  `Gifts %`=100*w_mean(qty_gift,weight)/w_mean(qty_pur+qty_own+qty_gift,weight), .groups="drop")
-
-# budget composition: mean ASF budget share by item × quartile (per household)
-tab_budget <- dat %>% filter(!is.na(q), qty_total>0) %>%
-  group_by(Q=q, Item=label) %>% summarise(Share=100*w_mean(budget_share,weight), .groups="drop")
+    `Quantity ratio (Q4/Q1)`   = ifelse(pmin(nc_Q1,nc_Q4)>=30, q_Q4/q_Q1, NA),
+    `Expenditure ratio (Q4/Q1)`= ifelse(pmin(nc_Q1,nc_Q4)>=30, v_Q4/v_Q1, NA),
+    `Unit value ratio (Q4/Q1)` = ifelse(pmin(nb_Q1,nb_Q4)>=30, u_Q4/u_Q1, NA))
 
 
 ## ===========================================================================
-## 5. ELASTICITIES — unit-value method (Deaton 1988), OLS with HC1 SE
+## 5. ELASTICITIES & QUALITY EFFECT  (outline points 10-13)
 ## ===========================================================================
-# value = quantity × unit value, so eps_value = eps_quantity + eps_quality.
-# Regressors: log welfare per AE + log adult eq + urban + wave (+ item, pooled).
+# Deaton unit-value method. value = quantity * unit value, so the expenditure
+# elasticity = quantity elasticity + quality elasticity. The quality elasticity
+# is the WEDGE (expenditure minus quantity). Purchased quantity/value are used so
+# the identity holds. Controls: log welfare per AE, log adult eq, urban, wave.
 reg <- dat %>% filter(qty_pur>0, exp>0, is.finite(unit_value), welfare>0, adulteq>0) %>%
-  mutate(lx=log(welfare), lae=log(adulteq), wave=factor(wave))
+  mutate(lx = log(welfare), lae = log(adulteq), wave = factor(wave))
 
 coef_lx <- function(form, d) { m <- lm(as.formula(form), d)
   coeftest(m, vcov = vcovHC(m, type="HC1"))["lx", c("Estimate","Std. Error")] }
 
-# per item
+## (10-11) per item: quantity, expenditure and quality (wedge) elasticities
 elast <- reg %>% group_by(Item = label) %>% group_modify(~{
-  e <- coef_lx("log(exp) ~ lx+lae+urban+wave", .x)
   q <- coef_lx("log(qty_pur) ~ lx+lae+urban+wave", .x)
+  e <- coef_lx("log(exp) ~ lx+lae+urban+wave", .x)
   v <- coef_lx("log(unit_value) ~ lx+lae+urban+wave", .x)
-  tibble(Expenditure=e[1], Quantity=q[1], Quality=v[1], Quality_se=v[2],
-         t=v[1]/v[2], p_1sided=pt(v[1]/v[2], nrow(.x)-1, lower.tail=FALSE))
+  tibble(`Quantity elast`=q[1], `Expenditure elast`=e[1], `Quality (wedge)`=v[1],
+         Quality_se=v[2], t=v[1]/v[2], p_1sided=pt(v[1]/v[2], nrow(.x)-1, lower.tail=FALSE))
 }) %>% ungroup()
-
-# pooled (item dummies)
-ep <- coef_lx("log(exp) ~ lx+lae+urban+wave+label", reg)
 qp <- coef_lx("log(qty_pur) ~ lx+lae+urban+wave+label", reg)
+ep <- coef_lx("log(exp) ~ lx+lae+urban+wave+label", reg)
 vp <- coef_lx("log(unit_value) ~ lx+lae+urban+wave+label", reg)
-elast <- bind_rows(elast, tibble(Item="ALL ITEMS", Expenditure=ep[1], Quantity=qp[1],
-  Quality=vp[1], Quality_se=vp[2], t=vp[1]/vp[2], p_1sided=pt(vp[1]/vp[2], nrow(reg)-1, lower.tail=FALSE)))
-elast <- elast %>% mutate(`Quality share %` = 100*Quality/Expenditure,
-                          `Reject H0` = p_1sided < 0.05)
+elast <- bind_rows(elast, tibble(Item="ALL ITEMS", `Quantity elast`=qp[1],
+  `Expenditure elast`=ep[1], `Quality (wedge)`=vp[1], Quality_se=vp[2],
+  t=vp[1]/vp[2], p_1sided=pt(vp[1]/vp[2], nrow(reg)-1, lower.tail=FALSE))) %>%
+  mutate(`Exp > Qty` = `Expenditure elast` > `Quantity elast`, `Reject H0 (quality=0)` = p_1sided < 0.05)
 
-# quality elasticity by subgroup (rural/urban, livestock, wave) — pooled, item FE
-quality_only <- function(d, form) { v <- coef_lx(form, d)
+## (12) heterogeneity: quality elasticity by subgroup (pooled across items)
+qonly <- function(d, form) { v <- coef_lx(form, d)
   tibble(Quality=v[1], se=v[2], p_1sided=pt(v[1]/v[2], nrow(d)-1, lower.tail=FALSE)) }
 elast_sub <- bind_rows(
-  quality_only(filter(reg, urban==0), "log(unit_value) ~ lx+lae+wave+label") %>% mutate(Group="Rural"),
-  quality_only(filter(reg, urban==1), "log(unit_value) ~ lx+lae+wave+label") %>% mutate(Group="Urban"),
-  quality_only(filter(reg, livestock==1), "log(unit_value) ~ lx+lae+urban+wave+label") %>% mutate(Group="Owns livestock"),
-  quality_only(filter(reg, livestock==0), "log(unit_value) ~ lx+lae+urban+wave+label") %>% mutate(Group="No livestock"),
-  quality_only(filter(reg, wave=="Y3"), "log(unit_value) ~ lx+lae+urban+label") %>% mutate(Group="Wave 3"),
-  quality_only(filter(reg, wave=="Y4"), "log(unit_value) ~ lx+lae+urban+label") %>% mutate(Group="Wave 4"),
-  quality_only(filter(reg, wave=="Y5"), "log(unit_value) ~ lx+lae+urban+label") %>% mutate(Group="Wave 5")
+  qonly(filter(reg, urban==0), "log(unit_value) ~ lx+lae+wave+label") %>% mutate(Group="Rural"),
+  qonly(filter(reg, urban==1), "log(unit_value) ~ lx+lae+wave+label") %>% mutate(Group="Urban"),
+  qonly(filter(reg, livestock==1), "log(unit_value) ~ lx+lae+urban+wave+label") %>% mutate(Group="Owns livestock"),
+  qonly(filter(reg, livestock==0), "log(unit_value) ~ lx+lae+urban+wave+label") %>% mutate(Group="No livestock"),
+  qonly(filter(reg, wave=="Y3"), "log(unit_value) ~ lx+lae+urban+label") %>% mutate(Group="Wave 3"),
+  qonly(filter(reg, wave=="Y4"), "log(unit_value) ~ lx+lae+urban+label") %>% mutate(Group="Wave 4"),
+  qonly(filter(reg, wave=="Y5"), "log(unit_value) ~ lx+lae+urban+label") %>% mutate(Group="Wave 5")
 ) %>% select(Group, Quality, se, p_1sided)
+
+## (13) KEY QUESTION — does quality upgrading DIFFER by residence / livestock?
+## Interact income with the group dummy; the interaction is the difference in the
+## quality elasticity (two-sided p-value tests whether it differs).
+het_test <- function(inter, nm) {
+  m  <- lm(as.formula(paste0("log(unit_value) ~ lx + lx:", inter, " + lae + ", inter, " + wave + label")), reg)
+  ct <- coeftest(m, vcov = vcovHC(m, type="HC1"))
+  r  <- grep(paste0("lx:", inter), rownames(ct), value=TRUE)[1]
+  tibble(Test = nm, Difference = ct[r,1], se = ct[r,2], p_value = ct[r,4])
+}
+tab13_het <- bind_rows(
+  het_test("urban",     "Urban vs rural (quality elasticity difference)"),
+  het_test("livestock", "Livestock owner vs non-owner (difference)"))
 
 
 ## ===========================================================================
-## 6. WRITE ONE EXCEL FILE
+## 6. WRITE ONE EXCEL FILE (sheets numbered as in the outline)
 ## ===========================================================================
 rnd <- function(d,k=2) mutate(d, across(where(is.numeric), ~round(.x,k)))
 write.xlsx(list(
-  "Households"=rnd(tab_hh,1), "Items overall"=rnd(tab_items), "By quartile"=rnd(byq),
-  "Q4 over Q1"=rnd(tab_ratio), "By rural-urban"=rnd(tab_area), "By livestock"=rnd(tab_live),
-  "Quantity source"=rnd(tab_source,1), "Budget composition"=rnd(tab_budget,1),
-  "Elasticities"=rnd(elast,3), "Elasticity subgroups"=rnd(elast_sub,3)
-), file="results.xlsx", overwrite=TRUE)
+  "1_Sample"             = rnd(tab1_sample, 1),
+  "2_Products"           = rnd(tab2_products),
+  "3_Consumption_by_wave"= rnd(tab3_wave),
+  "4_Urban_rural"        = rnd(tab4_urban_rural),
+  "5_Sources"            = rnd(tab5_sources, 1),
+  "9_Inequality_ratios"  = rnd(tab9_ratio),
+  "10_11_Elasticities"   = rnd(elast, 3),
+  "12_Heterogeneity"     = rnd(elast_sub, 3),
+  "13_Het_tests"         = rnd(tab13_het, 4)
+), file = "results.xlsx", overwrite = TRUE)
 
 
 ## ===========================================================================
-## 7. FIGURES  (all items together; >=10 useful charts)
+## 7. FIGURES  (numbered to match the outline; all items shown together)
 ## ===========================================================================
-gg <- function(name, p, w=9, h=5.5) ggsave(file.path("figures", name), p, width=w, height=h, dpi=150)
+gg  <- function(name, p, w=9, h=5.5) ggsave(file.path("figures", name), p, width=w, height=h, dpi=150)
 ord <- function(d) mutate(d, Item = factor(Item, levels = item_order))
-# index to the poorest available quartile = 100 (units become comparable)
 idx <- function(d, col) d %>% group_by(Item) %>% arrange(Q) %>%
-  mutate(Index = 100 * .data[[col]] / first(na.omit(.data[[col]]))) %>% ungroup()
+  mutate(Index = 100*.data[[col]]/first(na.omit(.data[[col]]))) %>% ungroup()
 
-## --- DESCRIPTIVE ---
-
-# 1. Participation by item
-p <- ggplot(ord(tab_items), aes(reorder(Item,`% consuming`), `% consuming`, fill=Item)) +
+## (1) participation
+p <- tab2_products %>% ord() %>%
+  ggplot(aes(reorder(Item, `% consuming`), `% consuming`, fill=Item)) +
   geom_col(show.legend=FALSE) + scale_fill_manual(values=pal) + coord_flip() +
-  labs(title="Share of households consuming each item", x=NULL, y="% (past 7 days)")
+  labs(title="Participation: share of households consuming each item", x=NULL, y="% (past 7 days)")
 gg("01_participation.png", p, 8, 5)
 
-# 2. Participation rural vs urban
-p <- tab_area %>% ord() %>%
-  ggplot(aes(Item, `% consuming`, fill=Area)) + geom_col(position="dodge") +
-  labs(title="Participation: rural vs urban", x=NULL, y="% consuming", fill=NULL) +
-  theme(axis.text.x=element_text(angle=20,hjust=1))
-gg("02_participation_rural_urban.png", p)
+## (3) consumption trends across waves (quantity per AE, index Wave 3 = 100)
+p <- cons_wave %>% group_by(Item) %>% arrange(Wave) %>%
+  mutate(Index = 100*`Quantity/AE`/first(na.omit(`Quantity/AE`))) %>% ungroup() %>% ord() %>%
+  ggplot(aes(Wave, Index, colour=Item, group=Item)) + geom_line(linewidth=1) + geom_point() +
+  scale_colour_manual(values=pal) +
+  labs(title="3. Consumption trends across survey waves",
+       subtitle="Quantity per adult equivalent, index Wave 3 = 100", x="Survey wave",
+       y="Quantity per AE (index)", colour=NULL)
+gg("03_consumption_by_wave.png", p)
 
-# 3. Quantity index by quartile (all items, Q1 = 100)
+## (4) urban vs rural consumption (value per AE, same TSH unit -> comparable)
+p <- tab4_urban_rural %>% ord() %>%
+  ggplot(aes(Item, `Value/AE (TSH)`, fill=Area)) + geom_col(position="dodge") +
+  labs(title="4. Urban vs rural consumption", subtitle="Value of consumption per adult equivalent",
+       x=NULL, y="Value per AE (TSH)", fill=NULL) + theme(axis.text.x=element_text(angle=20,hjust=1))
+gg("04_urban_rural.png", p)
+
+## (5) sources of consumption
+p <- tab5_sources %>% pivot_longer(-Item, names_to="Source", values_to="Share") %>% ord() %>%
+  mutate(Source=factor(Source, levels=c("Purchased %","Own production %","Gifts/transfers %"))) %>%
+  ggplot(aes(Item, Share, fill=Source)) + geom_col() +
+  labs(title="5. Sources of food consumption", x=NULL, y="% of consumed quantity", fill=NULL) +
+  theme(axis.text.x=element_text(angle=20,hjust=1))
+gg("05_sources.png", p)
+
+## (6) consumption per AE by income quartile (pooled, all six items, index)
 p <- byq %>% filter(N_cons>=30) %>% idx("Quantity/AE") %>% ord() %>%
   ggplot(aes(Q, Index, colour=Item, group=Item)) + geom_line(linewidth=1) + geom_point() +
   scale_colour_manual(values=pal) +
-  labs(title="Quantity per adult equivalent rises with income",
-       subtitle="Index, poorest quartile Q1 = 100 (so all items are comparable)",
-       x="Welfare quartile (poor → rich)", y="Quantity index (Q1 = 100)", colour=NULL)
-gg("03_quantity_index.png", p)
+  labs(title="6. Consumption per adult equivalent by income quartile",
+       subtitle="Pooled sample; index, poorest quartile = 100",
+       x="Income quartile (poor → rich)", y="Quantity per AE (index)", colour=NULL)
+gg("06_consumption_by_quartile.png", p)
 
-# 4. Value index by quartile
+## (7) expenditure per AE by income quartile (pooled, index)
 p <- byq %>% filter(N_cons>=30) %>% idx("Value/AE (TSH)") %>% ord() %>%
   ggplot(aes(Q, Index, colour=Item, group=Item)) + geom_line(linewidth=1) + geom_point() +
   scale_colour_manual(values=pal) +
-  labs(title="Value of consumption per adult equivalent rises with income",
-       subtitle="Index, Q1 = 100 — note it rises MORE than quantity (quality upgrading)",
-       x="Welfare quartile (poor → rich)", y="Value index (Q1 = 100)", colour=NULL)
-gg("04_value_index.png", p)
+  labs(title="7. Expenditure per adult equivalent by income quartile",
+       subtitle="Pooled sample; index, poorest quartile = 100 (rises more than quantity)",
+       x="Income quartile (poor → rich)", y="Expenditure per AE (index)", colour=NULL)
+gg("07_expenditure_by_quartile.png", p)
 
-# 5. Unit value (quality) index by quartile  [KEY descriptive]
-p <- byq %>% filter(N_buy>=30) %>% idx("Unit value (TSH)") %>% ord() %>%
-  ggplot(aes(Q, Index, colour=Item, group=Item)) + geom_line(linewidth=1) + geom_point() +
-  geom_hline(yintercept=100, linetype="dashed") + scale_colour_manual(values=pal) +
-  labs(title="Unit value (quality) rises with income",
-       subtitle="Index, poorest shown quartile = 100 — richer households pay more per kg / litre / piece",
-       x="Welfare quartile (poor → rich)", y="Unit value index", colour=NULL)
-gg("05_unitvalue_index.png", p)
+## (8) consumption vs expenditure, six panels (the quality wedge per product)
+p <- byq %>% filter(N_cons>=30) %>% group_by(Item) %>% arrange(Q) %>%
+  mutate(Quantity   = 100*`Quantity/AE`/first(na.omit(`Quantity/AE`)),
+         Expenditure= 100*`Value/AE (TSH)`/first(na.omit(`Value/AE (TSH)`))) %>% ungroup() %>%
+  select(Item, Q, Quantity, Expenditure) %>%
+  pivot_longer(c(Quantity, Expenditure), names_to="Measure", values_to="Index") %>% ord() %>%
+  ggplot(aes(Q, Index, colour=Measure, group=Measure)) + geom_line(linewidth=1) + geom_point() +
+  facet_wrap(~ Item) +
+  labs(title="8. Consumption vs expenditure across income quartiles",
+       subtitle="Index, poorest quartile = 100. Expenditure (orange) rises above quantity = quality wedge",
+       x="Income quartile (poor → rich)", y="Index (Q1 = 100)", colour=NULL)
+gg("08_consumption_vs_expenditure_panels.png", p, 10, 6)
 
-# 6. Share of quantity purchased by quartile (market integration)
-p <- byq %>% ord() %>%
-  ggplot(aes(Q, `Purchased %`, colour=Item, group=Item)) + geom_line(linewidth=1) + geom_point() +
-  scale_colour_manual(values=pal) +
-  labs(title="Market integration rises with income",
-       subtitle="Share of consumed quantity that is purchased (rest is own production / gifts)",
-       x="Welfare quartile (poor → rich)", y="% of quantity purchased", colour=NULL)
-gg("06_purchased_share.png", p)
-
-# 7. Source of quantity: purchased / own / gifts (shares, all items)
-p <- tab_source %>% pivot_longer(-Item, names_to="Source", values_to="Share") %>% ord() %>%
-  mutate(Source=factor(Source, levels=c("Purchased %","Own production %","Gifts %"))) %>%
-  ggplot(aes(Item, Share, fill=Source)) + geom_col() +
-  labs(title="Where consumed quantity comes from", x=NULL, y="% of quantity", fill=NULL) +
-  theme(axis.text.x=element_text(angle=20,hjust=1))
-gg("07_quantity_source.png", p)
-
-# 8. Animal-food budget composition across quartiles
-p <- tab_budget %>% ord() %>%
-  ggplot(aes(Q, Share, fill=Item)) + geom_col() + scale_fill_manual(values=pal) +
-  labs(title="Composition of the animal-food basket by income",
-       subtitle="Share of each item in total animal-food value (per household)",
-       x="Welfare quartile (poor → rich)", y="% of animal-food value", fill=NULL)
-gg("08_budget_composition.png", p)
-
-## --- ELASTICITIES ---
-
-# 9. Q4/Q1 ratios: value vs quantity vs unit value  [KEY]
-p <- tab_ratio %>% pivot_longer(-Item, names_to="Measure", values_to="Ratio") %>% ord() %>%
-  mutate(Measure=factor(Measure, levels=c("Quantity Q4/Q1","Value Q4/Q1","Unit value Q4/Q1"))) %>%
+## (9) inequality ratios Q4/Q1
+p <- tab9_ratio %>% pivot_longer(-Item, names_to="Measure", values_to="Ratio") %>% ord() %>%
+  mutate(Measure=factor(Measure, levels=c("Quantity ratio (Q4/Q1)","Expenditure ratio (Q4/Q1)","Unit value ratio (Q4/Q1)"))) %>%
   ggplot(aes(Item, Ratio, fill=Measure)) + geom_col(position="dodge") +
   geom_hline(yintercept=1, linetype="dashed") +
-  labs(title="Richest vs poorest quartile (Q4/Q1)",
-       subtitle="Value rises more than quantity; the gap is the higher unit value (quality)",
-       x=NULL, y="Q4 / Q1 ratio", fill=NULL) + theme(axis.text.x=element_text(angle=20,hjust=1))
-gg("09_Q4Q1_ratios.png", p)
-
-# 10. Expenditure elasticity = quantity + quality (stacked)  [KEY]
-p <- elast %>% filter(Item!="ALL ITEMS") %>% select(Item, Quantity, Quality) %>%
-  pivot_longer(-Item, names_to="Part", values_to="Elast") %>% ord() %>%
-  ggplot(aes(Item, Elast, fill=Part)) + geom_col() +
-  scale_fill_manual(values=c(Quantity="#0072B2", Quality="#D55E00")) +
-  labs(title="Expenditure elasticity = quantity + quality",
-       subtitle="The orange part (quality) is the quality-upgrading effect",
-       x=NULL, y="Elasticity w.r.t. real expenditure per AE", fill=NULL) +
+  labs(title="9. Inequality ratios across income quartiles (Q4/Q1)", x=NULL, y="Q4 / Q1 ratio", fill=NULL) +
   theme(axis.text.x=element_text(angle=20,hjust=1))
-gg("10_decomposition.png", p)
+gg("09_inequality_ratios.png", p)
 
-# 11. Quality elasticity with 95% CI (the hypothesis test)  [KEY]
-p <- elast %>% mutate(lo=Quality-1.96*Quality_se, hi=Quality+1.96*Quality_se,
-                      Item=factor(Item, levels=Item[order(Quality)])) %>%
-  ggplot(aes(Quality, Item)) + geom_vline(xintercept=0, linetype="dashed") +
+## (10) quantity vs expenditure elasticities
+p <- elast %>% filter(Item!="ALL ITEMS") %>% select(Item, `Quantity elast`, `Expenditure elast`) %>%
+  pivot_longer(-Item, names_to="Elasticity", values_to="Value") %>% ord() %>%
+  ggplot(aes(Item, Value, fill=Elasticity)) + geom_col(position="dodge") +
+  scale_fill_manual(values=c(`Quantity elast`="#0072B2", `Expenditure elast`="#D55E00")) +
+  labs(title="10. Quantity vs expenditure elasticities",
+       subtitle="Expenditure elasticity exceeds quantity elasticity for every product",
+       x=NULL, y="Elasticity w.r.t. income per AE", fill=NULL) +
+  theme(axis.text.x=element_text(angle=20,hjust=1))
+gg("10_elasticities.png", p)
+
+## (11) the quality effect = wedge (expenditure - quantity), with 95% CI
+p <- elast %>% mutate(lo=`Quality (wedge)`-1.96*Quality_se, hi=`Quality (wedge)`+1.96*Quality_se,
+                      Item=factor(Item, levels=Item[order(`Quality (wedge)`)])) %>%
+  ggplot(aes(`Quality (wedge)`, Item)) + geom_vline(xintercept=0, linetype="dashed") +
   geom_errorbarh(aes(xmin=lo, xmax=hi), height=.25) + geom_point(size=3, colour="#D55E00") +
-  labs(title="Quality elasticity by item (95% CI)",
-       subtitle="All bars are right of zero → H0 (no quality upgrading) is rejected",
-       x="Quality elasticity", y=NULL)
-gg("11_quality_CI.png", p, 8, 5)
+  labs(title="11. The quality effect (expenditure − quantity elasticity)",
+       subtitle="The wedge is positive and significant for all products = quality upgrading",
+       x="Quality elasticity (wedge)", y=NULL)
+gg("11_quality_effect.png", p, 8, 5)
 
-# 12. Quality share of the expenditure elasticity
-p <- elast %>% filter(Item!="ALL ITEMS") %>% ord() %>%
-  ggplot(aes(reorder(Item,`Quality share %`), `Quality share %`, fill=Item)) +
-  geom_col(show.legend=FALSE) + scale_fill_manual(values=pal) + coord_flip() +
-  labs(title="How much of the income response is quality?",
-       x=NULL, y="Quality share of expenditure elasticity (%)")
-gg("12_quality_share.png", p, 8, 5)
-
-# 13. Quality elasticity by subgroup (rural/urban, livestock, wave)
+## (12) heterogeneity in quality upgrading by subgroup
 p <- elast_sub %>% mutate(lo=Quality-1.96*se, hi=Quality+1.96*se,
        Group=factor(Group, levels=rev(c("Rural","Urban","Owns livestock","No livestock","Wave 3","Wave 4","Wave 5")))) %>%
   ggplot(aes(Quality, Group)) + geom_vline(xintercept=0, linetype="dashed") +
-  geom_errorbarh(aes(xmin=lo, xmax=hi), height=.25) + geom_point(size=3, colour="#0072B2") +
-  labs(title="Quality elasticity across subgroups (95% CI)",
-       subtitle="Positive everywhere; somewhat stronger in rural areas",
-       x="Quality elasticity (pooled across items)", y=NULL)
-gg("13_quality_subgroups.png", p, 8, 5)
+  geom_errorbarh(aes(xmin=lo, xmax=hi), height=.25) + geom_point(size=3, colour="#009E73") +
+  labs(title="12. Heterogeneity in quality upgrading",
+       subtitle="Quality elasticity by subgroup (pooled across items, 95% CI)",
+       x="Quality elasticity", y=NULL)
+gg("12_heterogeneity.png", p, 8, 5)
 
-# 14. Continuous quality gradient: ln(unit value) vs ln(welfare), one line per item
+## (supporting) continuous quality gradient: ln(unit value) vs ln(income)
 p <- ggplot(reg, aes(lx, log(unit_value), colour=label)) +
   geom_smooth(method="lm", se=FALSE, linewidth=1) + scale_colour_manual(values=pal) +
   labs(title="Quality gradient: unit value rises with income (all items)",
-       subtitle="Fitted lines of log unit value on log real expenditure per AE; slope = quality elasticity",
+       subtitle="Fitted log-log lines; slope = quality elasticity",
        x="log(real expenditure per adult equivalent)", y="log(unit value)", colour=NULL)
 gg("14_quality_gradient.png", p)
 
-cat("Done: results.xlsx and 14 figures in /figures\n")
+cat("Done: results.xlsx (9 sheets) and figures in /figures\n")

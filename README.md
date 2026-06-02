@@ -1,11 +1,10 @@
 # Quality upgrading in animal-source foods — Tanzania (NPS waves 3–5)
 
-**Hypothesis.** As household income rises, expenditure on animal products
-increases *faster* than quantity, because households shift towards
-higher-quality items. Using unit values and the identity
-`ln(expenditure) = ln(quantity) + ln(unit value)`, the expenditure elasticity
-splits as `ε_expenditure = ε_quantity + ε_quality`, and we test
-`H0: ε_quality = 0` vs `H1: ε_quality > 0`.
+**Hypothesis.** As household income rises, expenditure on animal products rises
+*faster* than quantity, because households trade up to higher-quality items.
+With `ln(expenditure) = ln(quantity) + ln(unit value)` the expenditure elasticity
+splits as `ε_expenditure = ε_quantity + ε_quality`; the **wedge** (expenditure −
+quantity) is the quality effect. We test `H0: ε_quality = 0` vs `H1: > 0`.
 
 ## How to run
 
@@ -15,40 +14,48 @@ splits as `ε_expenditure = ε_quantity + ε_quality`, and we test
 source("analysis.R")
 ```
 
-It produces:
+Outputs: **`results.xlsx`** (9 sheets) and **`figures/`** (12 charts, all six
+products shown together; different units made comparable with indices and logs).
 
-- **`results.xlsx`** — one workbook (sheets: `Households`, `Items overall`,
-  `By quartile`, `Q4 over Q1`, `By rural-urban`, `By livestock`,
-  `Quantity source`, `Budget composition`, `Elasticities`, `Elasticity subgroups`).
-- **`figures/`** — 14 charts, all showing the six items **together** (different
-  units are made comparable with indices, Q1 = 100, and logs):
-  - Descriptive: 01 participation · 02 participation rural/urban ·
-    03 quantity index · 04 value index · 05 unit-value (quality) index ·
-    06 purchased share (market integration) · 07 quantity source ·
-    08 budget composition.
-  - Elasticities: 09 Q4/Q1 ratios · 10 decomposition (quantity + quality) ·
-    11 quality elasticity with 95% CI (the test) · 12 quality share ·
-    13 quality by subgroup (rural/urban, livestock, wave) · 14 quality gradient.
+## Outputs mapped to the research outline
+
+| # | Outline item | Output |
+|---|---|---|
+| 1 | Sample descriptive statistics (full / urban-rural / livestock) | sheet `1_Sample` |
+| 2 | Product-level descriptive statistics | sheet `2_Products`, fig `01_participation` |
+| 3 | Consumption trends across survey waves | sheet `3_Consumption_by_wave`, fig `03` |
+| 4 | Urban–rural consumption patterns | sheet `4_Urban_rural`, fig `04` |
+| 5 | Sources of food consumption (purchase / own / gifts) | sheet `5_Sources`, fig `05` |
+| 6 | Consumption by income quartile (line) | fig `06_consumption_by_quartile` |
+| 7 | Expenditure by income quartile (line) | fig `07_expenditure_by_quartile` |
+| 8 | Consumption vs expenditure (six panels) | fig `08_consumption_vs_expenditure_panels` |
+| 9 | Inequality ratios Q4/Q1 (quantity, expenditure, unit value) | sheet `9_Inequality_ratios`, fig `09` |
+| 10 | Quantity vs expenditure elasticities | sheet `10_11_Elasticities`, fig `10` |
+| 11 | The quality effect (the wedge) | sheet `10_11_Elasticities`, fig `11_quality_effect` |
+| 12 | Heterogeneity (urban/rural, livestock) | sheet `12_Heterogeneity`, fig `12` |
+| 13 | Key question — does it differ by residence / livestock? | sheet `13_Het_tests` |
 
 ## Method notes
 
 - Items: goat meat, beef, pork, chicken & poultry, eggs, fresh milk.
-  (Processed milk is not in the master files.)
-- Units harmonised: meats → kg, eggs → pieces, milk → litres (each kept in its
-  own unit; never mixed on one axis).
-- Welfare = real total expenditure per adult equivalent; **quartiles** are built
-  within wave (their levels are not comparable across waves).
-- Descriptives are survey-weighted; unit values use the median; extreme
-  unit-value/quantity outliers are trimmed (1st–99th percentile within item×wave).
-- Consumption is valued at the unit price (home production at the item's median
-  price), so quantity and value are on the same basis.
-- Elasticities: three OLS regressions on log real expenditure per AE with log
-  adult equivalents, an urban dummy and wave dummies; robust (HC1) standard
-  errors. The purchased quantity/value are used so the identity holds exactly.
+- Units harmonised: meats → kg, eggs → pieces, milk → litres (never mixed on a
+  raw axis: figures use indices, Q1 = 100, or logs).
+- Welfare = real total expenditure per adult equivalent; quartiles built within
+  wave. Descriptives are survey-weighted; unit values use the median; extreme
+  outliers trimmed (1st–99th percentile within item×wave).
+- Consumption is valued at the unit price (own production at the item's median
+  price) so quantity and expenditure are on the same basis.
+- Elasticities: Deaton unit-value method — OLS of log quantity, expenditure and
+  unit value on log income per AE + log adult eq + urban + wave; HC1 robust SE.
+- Heterogeneity (point 13): income is interacted with the urban and livestock
+  dummies; the interaction coefficient is the difference in the quality
+  elasticity (two-sided test).
 
-## Main result
+## Main results
 
-Quality upgrading is confirmed: the quality elasticity is positive and
-statistically significant for every item (pooled ≈ 0.12), so `H0` is rejected.
-The income response works mainly through quantity, with a smaller but robust
-quality component.
+- Expenditure elasticity exceeds quantity elasticity for **every** product; the
+  quality wedge is positive and significant (pooled ≈ 0.12) → **H0 rejected**.
+- **Quality upgrading does not differ significantly between urban and rural
+  households** (interaction p ≈ 0.23).
+- **Livestock ownership** changes the quality elasticity by a statistically
+  significant but **economically negligible** amount (≈ −0.007).

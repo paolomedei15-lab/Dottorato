@@ -299,6 +299,20 @@ items$item_label <- factor(items$item_label, levels = item_levels)
 items$item_unit <- factor(paste0(items$item_label, " (", items$unit, ")"),
                           levels = paste0(item_cfg$label, " (", item_cfg$unit, ")"))
 
+## Value of consumption (for budget shares): quantity x price, where price is the
+## household's unit value if it purchased, else the item x wave median price.
+## (Used only for the basket-composition output; the elasticities use the
+## purchased quantity/value, so these columns do not affect them.)
+items <- items %>%
+  group_by(item, wave) %>%
+  mutate(price = ifelse(is.finite(unit_value), unit_value, wmedian(unit_value, weight))) %>%
+  ungroup() %>%
+  mutate(cons_value = qty_total * price) %>%
+  group_by(wave, hhid) %>%
+  mutate(asf_value    = sum(cons_value, na.rm = TRUE),
+         budget_share = ifelse(asf_value > 0, cons_value / asf_value, NA_real_)) %>%
+  ungroup()
+
 message("Households pooled: ", nrow(household),
         " | item-rows: ", nrow(items))
 
@@ -893,7 +907,114 @@ ggsave(file.path(out_fig, "fig20_unitvalue_rural_urban.png"), g20, width = 10, h
 
 
 ## ============================================================================
-## 12. DONE
+## 12. EXTRA OUTPUTS MAPPED TO THE RESEARCH OUTLINE
+## ============================================================================
+gt_all <- group_tables %>% filter(area == "all")
+## index to Q1 = 100 within item (makes different units comparable on one axis)
+idx_q <- function(d, col) d %>% group_by(item_label) %>% arrange(group) %>%
+  mutate(Index = 100 * .data[[col]] / first(na.omit(.data[[col]]))) %>% ungroup()
+
+## (4) product-level descriptive statistics: expenditure per AE by item
+g <- ggplot(item_summary, aes(reorder(item_label, mean_exp_pae), mean_exp_pae)) +
+  geom_col(fill = "steelblue") + coord_flip() +
+  labs(title = "Expenditure per adult equivalent by item (consumers)",
+       x = NULL, y = "Expenditure per AE (TSH, 7 days)")
+ggsave(file.path(out_fig, "fig_p04_expenditure_by_item.png"), g, width = 8, height = 5, dpi = 150)
+
+## (5) consumption trends across waves: quantity per AE, index Wave Y3 = 100
+cons_wave <- items %>% group_by(item_label, wave) %>%
+  summarise(qty_pae = wmean(ifelse(qty_total > 0, qty_total_pae, NA), weight), .groups = "drop")
+write.csv(cons_wave, file.path(out_tab, "10_consumption_by_wave.csv"), row.names = FALSE)
+g <- cons_wave %>% group_by(item_label) %>% arrange(wave) %>%
+  mutate(Index = 100 * qty_pae / first(na.omit(qty_pae))) %>% ungroup() %>%
+  ggplot(aes(wave, Index, colour = item_label, group = item_label)) +
+  geom_line(linewidth = 1) + geom_point() +
+  labs(title = "Consumption trends across survey waves",
+       subtitle = "Quantity per adult equivalent, index Wave Y3 = 100",
+       x = "Survey wave", y = "Quantity per AE (index)", colour = NULL)
+ggsave(file.path(out_fig, "fig_p05_consumption_by_wave.png"), g, width = 9, height = 5, dpi = 150)
+
+## (8) consumption per AE by income quartile, six products together (index)
+g <- gt_all %>% filter(n_obs >= min_cell) %>% idx_q("qty_pae") %>%
+  ggplot(aes(group, Index, colour = item_label, group = item_label)) +
+  geom_line(linewidth = 1) + geom_point() +
+  labs(title = "Consumption per adult equivalent by income quartile",
+       subtitle = "Pooled sample; index, poorest quartile = 100",
+       x = "Income quartile (poor -> rich)", y = "Quantity per AE (index)", colour = NULL)
+ggsave(file.path(out_fig, "fig_p08_consumption_by_quartile.png"), g, width = 9, height = 5, dpi = 150)
+
+## (9) expenditure per AE by income quartile, six products together (index)
+g <- gt_all %>% filter(n_obs >= min_cell) %>% idx_q("exp_pae") %>%
+  ggplot(aes(group, Index, colour = item_label, group = item_label)) +
+  geom_line(linewidth = 1) + geom_point() +
+  labs(title = "Expenditure per adult equivalent by income quartile",
+       subtitle = "Pooled sample; index, poorest quartile = 100",
+       x = "Income quartile (poor -> rich)", y = "Expenditure per AE (index)", colour = NULL)
+ggsave(file.path(out_fig, "fig_p09_expenditure_by_quartile.png"), g, width = 9, height = 5, dpi = 150)
+
+## (10) six panels: quantity, expenditure and unit value (index, Q1 = 100)
+panel <- gt_all %>% filter(n_obs >= min_cell) %>% group_by(item_unit) %>% arrange(group) %>%
+  mutate(Quantity     = 100 * qty_pae    / first(na.omit(qty_pae)),
+         Expenditure  = 100 * exp_pae    / first(na.omit(exp_pae)),
+         `Unit value` = 100 * unit_value / first(na.omit(unit_value))) %>% ungroup() %>%
+  select(item_unit, group, Quantity, Expenditure, `Unit value`) %>%
+  pivot_longer(c(Quantity, Expenditure, `Unit value`), names_to = "Measure", values_to = "Index") %>%
+  mutate(Measure = factor(Measure, levels = c("Expenditure", "Quantity", "Unit value")))
+g <- ggplot(panel, aes(group, Index, colour = Measure, group = Measure)) +
+  geom_line(linewidth = 1) + geom_point() +
+  facet_wrap(~ item_unit, scales = "free_y") +
+  scale_colour_manual(values = c(Expenditure = "#D55E00", Quantity = "#0072B2", `Unit value` = "#009E73")) +
+  labs(title = "Quantity, expenditure and unit value across income quartiles",
+       subtitle = "Index, poorest quartile = 100; expenditure above quantity = quality",
+       x = "Income quartile (poor -> rich)", y = "Index (poorest quartile = 100)", colour = NULL)
+ggsave(file.path(out_fig, "fig_p10_qty_exp_uv_panels.png"), g, width = 11, height = 6, dpi = 150)
+
+## (11) composition of the animal-food basket by income quartile
+budget_comp <- items %>% filter(!is.na(quartile), qty_total > 0) %>%
+  group_by(group = quartile, item_label) %>%
+  summarise(share = 100 * wmean(budget_share, weight), .groups = "drop")
+write.csv(budget_comp, file.path(out_tab, "11_budget_composition.csv"), row.names = FALSE)
+g <- ggplot(budget_comp, aes(group, share, fill = item_label)) +
+  geom_col() +
+  labs(title = "Composition of the animal-food basket by income",
+       subtitle = "Share of each item in total animal-food value (per household)",
+       x = "Income quartile (poor -> rich)", y = "% of animal-food value", fill = NULL)
+ggsave(file.path(out_fig, "fig_p11_budget_composition.png"), g, width = 9, height = 5, dpi = 150)
+
+## (15) heterogeneity test: does the quality elasticity differ by residence /
+## livestock? Income is interacted with the group dummy; the interaction is the
+## difference in the quality elasticity (two-sided p-value).
+het_test <- function(inter, nm) {
+  m  <- lm(as.formula(paste0("ln_uv ~ ln_w + ln_w:", inter, " + ln_ae + ", inter,
+                             " + wave + region + item")), data = est_pooled)
+  ct <- coeftest(m, vcov = vcov_cl(m))
+  r  <- grep(paste0("ln_w:", inter), rownames(ct), value = TRUE)[1]
+  tibble(test = nm, difference = ct[r, 1], se = ct[r, 2], p_value = ct[r, 4])
+}
+het_tests <- bind_rows(
+  het_test("urban",     "Urban vs rural (quality elasticity difference)"),
+  het_test("livestock", "Livestock owner vs non-owner (difference)")
+)
+write.csv(het_tests, file.path(out_tab, "12_heterogeneity_tests.csv"), row.names = FALSE)
+cat("\n==== Heterogeneity tests (interaction of income with group dummy) ====\n")
+print(as.data.frame(het_tests), digits = 4)
+
+## (15) graph: quality elasticity by subgroup with 95% CI
+g <- subgroup_elast %>%
+  mutate(lo = eps_quality - 1.96 * quality_se, hi = eps_quality + 1.96 * quality_se,
+         subgroup = factor(subgroup, levels = rev(c("Rural", "Urban", "Owns livestock", "No livestock")))) %>%
+  ggplot(aes(eps_quality, subgroup)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.25) +
+  geom_point(size = 3, colour = "#0072B2") +
+  labs(title = "Quality elasticity by subgroup (95% CI)",
+       subtitle = "Rural vs urban, and livestock ownership",
+       x = "Quality elasticity", y = NULL)
+ggsave(file.path(out_fig, "fig_p15_quality_subgroups.png"), g, width = 8, height = 5, dpi = 150)
+
+
+## ============================================================================
+## 13. DONE
 ## ============================================================================
 cat("\nAll tables saved to:", normalizePath(out_tab), "\n")
 cat("All figures saved to:", normalizePath(out_fig), "\n")

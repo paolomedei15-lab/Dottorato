@@ -84,6 +84,21 @@ is rejected. Quantity accounts for the larger share of the expenditure response.
 - **By wave** (`output/tables/09_…`): ε_quality ≈ 0.086 (Y3), 0.089 (Y4),
   0.065 (Y5) — consistent across waves.
 
+### Heterogeneity tests (`output/tables/12_heterogeneity_tests.csv`)
+
+Income is interacted with the group dummy; the interaction coefficient is the
+difference in the quality elasticity.
+
+- **Urban vs rural:** difference ≈ −0.012, p ≈ 0.23 — not statistically
+  significant (quality upgrading does not differ systematically by residence).
+- **Livestock owner vs non-owner:** difference ≈ −0.007, p < 0.01 —
+  statistically significant but economically negligible.
+
+The quality elasticity is positive and significant in all four income
+quartiles, so quality influences purchases across the whole distribution rather
+than starting at a single income threshold; the income level of each quartile
+is in `07_quartile_income_by_wave.csv`.
+
 ## 6. Outputs
 
 - **Tables** in `output/tables/` (household and item summaries, group means,

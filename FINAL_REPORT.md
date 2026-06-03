@@ -1,0 +1,113 @@
+# Food consumption and quality upgrading in Tanzania
+### First-stage analysis — results report
+
+*Data: Tanzania National Panel Survey (NPS), waves 3, 4 and 5 (pooled,
+13,071 households). Script: `analysis.R`. Standard errors clustered by region.*
+
+---
+
+## 1. Framework
+
+For each animal-source food the budget identity is exact:
+
+$$\ln(\text{expenditure}) = \ln(\text{quantity}) + \ln(\text{unit value}).$$
+
+Regressing each term on log real expenditure per adult equivalent (the welfare
+measure *W*) gives the Deaton (1988) decomposition
+
+$$\varepsilon_{\text{expenditure}} = \varepsilon_{\text{quantity}} + \varepsilon_{\text{quality}},$$
+
+where the quality elasticity is the elasticity of the unit value (the price paid
+per kg / litre / piece) with respect to *W*. The hypothesis tested is
+`H0: ε_quality = 0` vs `H1: ε_quality > 0`.
+
+**Items:** goat meat, beef, pork, chicken & poultry, eggs, fresh milk (processed
+milk is not available in the files). **Welfare** = real total expenditure per
+adult equivalent. Descriptive statistics are survey-weighted; regressions use
+OLS with region-clustered standard errors. Units are harmonised (meats in kg,
+eggs in pieces, milk in litres); unit values use the purchased quantity and
+value; extreme outliers are trimmed (1st–99th percentile within item × wave).
+
+## 2. Sample
+
+| Wave | Households | HH size | Adult eq. | Rural % | Urban % | Livestock % | Welfare/AE |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Y3 | 5,010 | 4.89 | 3.96 | 68.8 | 31.2 | 49.5 | 1,155,797 |
+| Y4 | 3,352 | 4.74 | 3.79 | 65.5 | 34.5 | 47.1 | 1,247,107 |
+| Y5 | 4,709 | 4.85 | 3.82 | 67.6 | 32.4 | 50.0 | 127,215 |
+| Pooled | 13,071 | 4.83 | 3.85 | 67.2 | 32.8 | 48.9 | 785,830 |
+
+The welfare aggregate is deflated to a wave-specific base, so its *level* is not
+comparable across waves (Wave 5 is about an order of magnitude lower). Welfare
+groups are therefore built within wave and the pooled regressions use wave fixed
+effects.
+
+## 3. Descriptive statistics (per adult equivalent, consumers)
+
+| Item | % consuming | Quantity/AE | Expenditure/AE (TSH) | Median unit value (TSH) |
+|---|---:|---:|---:|---:|
+| Goat meat | 10.8 | 0.47 kg | 1,621 | 5,000 /kg |
+| Beef | 36.0 | 0.37 kg | 2,038 | 6,000 /kg |
+| Pork | 4.7 | 0.31 kg | 1,673 | 5,000 /kg |
+| Chicken & poultry | 16.5 | 0.45 kg | 2,999 | 6,725 /kg |
+| Eggs | 17.1 | 2.08 pcs | 771 | 300 /piece |
+| Fresh milk | 25.9 | 1.09 L | 1,065 | 1,000 /litre |
+
+Across welfare quintiles, quantity, expenditure and unit value all rise with
+income (`output/tables/03_group_means.csv`, figures `fig2`, `fig8`, `fig9`).
+
+## 4. Elasticity decomposition (main result)
+
+Per-item regressions on log welfare per AE with log adult equivalents, a rural
+dummy, region and wave fixed effects; region-clustered standard errors.
+
+| Item | ε_expenditure | ε_quantity | ε_quality | p (one-sided) | Reject H0 |
+|---|---:|---:|---:|---:|:--:|
+| Goat meat | 0.368 | 0.301 | 0.067 | <0.001 | yes |
+| Beef | 0.435 | 0.397 | 0.038 | <0.001 | yes |
+| Pork | 0.420 | 0.332 | 0.087 | <0.001 | yes |
+| Chicken & poultry | 0.438 | 0.313 | 0.125 | <0.001 | yes |
+| Eggs | 0.449 | 0.383 | 0.067 | <0.001 | yes |
+| Fresh milk | 0.546 | 0.473 | 0.073 | <0.001 | yes |
+| **All items (pooled)** | **0.462** | **0.386** | **0.076** | <0.001 | yes |
+
+The expenditure elasticity exceeds the quantity elasticity for every item; the
+quality elasticity is positive and statistically significant in all cases, so H0
+is rejected. Quantity accounts for the larger share of the expenditure response.
+
+## 5. Quality elasticity across the distribution and by subgroup
+
+- **By welfare quintile** (`fig5`): the quality elasticity is positive and
+  significant in all five quintiles (Q1 ≈ 0.061, Q2 ≈ 0.040, Q3 ≈ 0.051,
+  Q4 ≈ 0.062, Q5 ≈ 0.067).
+- **By subgroup** (`output/tables/05b_…`): quality elasticity ≈ 0.089 rural,
+  0.056 urban, 0.085 livestock-owners, 0.088 non-owners.
+- **By wave** (`output/tables/09_…`): ε_quality ≈ 0.086 (Y3), 0.089 (Y4),
+  0.065 (Y5) — consistent across waves.
+
+## 6. Outputs
+
+- **Tables** in `output/tables/` (household and item summaries, group means,
+  top/bottom ratios, elasticities and subgroup/by-wave/by-quintile results).
+- **Figures** in `output/figures/` (`fig1`–`fig20`): ratios, unit-value and
+  quantity gradients, elasticity decomposition and 95% CIs, rural/urban and
+  livestock comparisons, source shares, and Engel curves.
+
+## 7. Notes and limitations
+
+- Elasticities are intensive-margin, conditional-on-purchase elasticities with
+  respect to total expenditure per adult equivalent.
+- Unit value is used as the proxy for quality; it can also reflect spatial price
+  differences and measurement error (mitigated by region fixed effects and
+  trimming).
+- Cross-wave welfare levels are not comparable (deflator base differs), so
+  groups are built within wave and the regressions use wave fixed effects.
+
+## How to run
+
+```r
+# install.packages(c("readxl","dplyr","tidyr","stringr","ggplot2",
+#                     "purrr","broom","sandwich","lmtest","scales"))
+# edit the three file paths at the top of analysis.R, then:
+source("analysis.R")
+```

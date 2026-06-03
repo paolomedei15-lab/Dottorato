@@ -539,19 +539,26 @@ gg("milk_08_unitvalue_vs_income.png", p, 8, 5)
 # M9. participation by income quartile — TOTAL (not split by area)
 d <- milk %>% filter(!is.na(q)) %>% group_by(Q=q) %>%
   summarise(p = 100*w_mean(as.numeric(qty_total>0), weight), .groups="drop")
-p <- ggplot(d, aes(Q, p, group=1)) + geom_line(colour="#56B4E9", linewidth=1.1) +
-  geom_point(colour="#56B4E9", size=3) +
+p <- ggplot(d, aes(Q, p, group=1)) +
+  geom_line(colour="#56B4E9", linewidth=1.1) + geom_point(colour="#56B4E9", size=3) +
+  geom_text(aes(label = paste0(round(p), "%")), vjust=-1.1, size=4.2, fontface="bold") +
+  scale_y_continuous(limits = c(0, max(d$p)*1.18), breaks = seq(0,100,5),
+                     labels = function(x) paste0(x, "%")) +
   labs(title="Fresh milk — share of consumers by income quartile (total)",
+       subtitle="% of households consuming milk in the past 7 days",
        x="Income quartile (poor → rich)", y="% of households consuming")
 gg("milk_09_participation_total.png", p, 8, 5)
 
 # M10. expenditure per AE by income quartile — TOTAL
 d <- milk %>% filter(!is.na(q), qty_total>0) %>% group_by(Q=q) %>%
   summarise(e = w_mean(value_pae, weight), .groups="drop")
-p <- ggplot(d, aes(Q, e, group=1)) + geom_line(colour="#D55E00", linewidth=1.1) +
-  geom_point(colour="#D55E00", size=3) +
+p <- ggplot(d, aes(Q, e, group=1)) +
+  geom_line(colour="#D55E00", linewidth=1.1) + geom_point(colour="#D55E00", size=3) +
+  geom_text(aes(label = format(round(e), big.mark=",")), vjust=-1.1, size=4.2, fontface="bold") +
+  scale_y_continuous(limits = c(0, max(d$e)*1.18), labels = function(x) format(x, big.mark=",")) +
   labs(title="Fresh milk — expenditure per adult equivalent by income quartile (total)",
-       x="Income quartile (poor → rich)", y="Expenditure per AE (TSH, 7 days)")
+       subtitle="Value of milk consumption per adult equivalent (TSH, past 7 days)",
+       x="Income quartile (poor → rich)", y="Expenditure per AE (TSH)")
 gg("milk_10_expenditure_total.png", p, 8, 5)
 
 cat("Done: results.xlsx (9 sheets) and figures in /figures\n")

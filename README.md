@@ -14,8 +14,10 @@ quantity) is the quality effect. We test `H0: ε_quality = 0` vs `H1: > 0`.
 source("analysis.R")
 ```
 
-Outputs: **`results.xlsx`** (9 sheets) and **`figures/`** (12 charts, all six
-products shown together; different units made comparable with indices and logs).
+Outputs: **`results.xlsx`** (9 sheets) and **`figures/`** (12 main charts +
+a fresh-milk focus set `milk_01`…`milk_08`: participation, consumption per
+household vs per adult equivalent, budget share, sources by quartile, rural vs
+urban, by livestock, unit-value distribution, and unit value vs income).
 
 ## Outputs mapped to the research outline
 

@@ -427,4 +427,95 @@ p <- ggplot(reg, aes(lx, log(unit_value), colour=label)) +
        x="log(real expenditure per adult equivalent)", y="log(unit value)", colour=NULL)
 gg("14_quality_gradient.png", p)
 
+
+## ===========================================================================
+## 8. FRESH MILK — focus figures (milk only)
+## ===========================================================================
+pct <- function(x) paste0(round(x*100), "%")
+milk <- dat %>% filter(item == "milk")
+
+# M1. participation by income quartile, rural vs urban
+d <- milk %>% filter(!is.na(q)) %>% mutate(Area = ifelse(urban==1,"Urban","Rural")) %>%
+  group_by(Q=q, Area) %>% summarise(p = 100*w_mean(as.numeric(qty_total>0), weight), .groups="drop")
+p <- ggplot(d, aes(Q, p, fill=Area)) + geom_col(position="dodge") +
+  labs(title="Fresh milk — participation by income quartile",
+       x="Income quartile (poor → rich)", y="% of households consuming", fill=NULL)
+gg("milk_01_participation.png", p, 8, 5)
+
+# M2. consumption PER HOUSEHOLD vs PER ADULT EQUIVALENT, by quartile
+d <- milk %>% filter(!is.na(q)) %>% group_by(Q=q) %>% summarise(
+  `Per household` = w_mean(ifelse(qty_total>0, qty_total, NA), weight),
+  `Per adult eq.` = w_mean(ifelse(qty_total>0, qty_pae, NA), weight), .groups="drop") %>%
+  pivot_longer(-Q, names_to="Basis", values_to="Litres")
+p <- ggplot(d, aes(Q, Litres, colour=Basis, group=Basis)) +
+  geom_line(linewidth=1.1) + geom_point(size=2.5) +
+  labs(title="Fresh milk: consumption per household vs per adult equivalent",
+       subtitle="Litres in the past 7 days (among consumers)",
+       x="Income quartile (poor → rich)", y="Litres (7 days)", colour=NULL)
+gg("milk_02_perHH_vs_perAE.png", p, 8, 5)
+
+# M3. milk share of the animal-food budget, by quartile
+d <- milk %>% filter(!is.na(q), qty_total>0) %>% group_by(Q=q) %>%
+  summarise(s = 100*w_mean(budget_share, weight), .groups="drop")
+p <- ggplot(d, aes(Q, s)) + geom_col(fill="#56B4E9") +
+  labs(title="Fresh milk: share of the animal-food budget",
+       x="Income quartile (poor → rich)", y="% of animal-food value")
+gg("milk_03_budget_share.png", p, 8, 5)
+
+# M4. where milk comes from, by quartile (shares: purchased / own / gifts)
+d <- milk %>% filter(!is.na(q), qty_total>0) %>% group_by(Q=q) %>% summarise(
+  Purchased = w_mean(qty_pur, weight), `Own production` = w_mean(qty_own, weight),
+  Gifts = w_mean(qty_gift, weight), .groups="drop") %>%
+  pivot_longer(-Q, names_to="Source", values_to="v") %>%
+  mutate(Source = factor(Source, levels=c("Purchased","Own production","Gifts")))
+p <- ggplot(d, aes(Q, v, fill=Source)) + geom_col(position="fill") +
+  scale_y_continuous(labels = pct) +
+  labs(title="Fresh milk: where it comes from, by income",
+       subtitle="Richer households buy more from the market (less own production)",
+       x="Income quartile (poor → rich)", y="Share of milk quantity", fill=NULL)
+gg("milk_04_sources_by_quartile.png", p, 8, 5)
+
+# M5. rural vs urban: quantity per AE, expenditure per AE, unit value
+d <- milk %>% mutate(Area = ifelse(urban==1,"Urban","Rural")) %>% group_by(Area) %>% summarise(
+  `Quantity per AE (litre)`   = w_mean(ifelse(qty_total>0, qty_pae, NA), weight),
+  `Expenditure per AE (TSH)`  = w_mean(ifelse(qty_total>0, value_pae, NA), weight),
+  `Unit value (TSH/litre)`    = w_median(unit_value, weight), .groups="drop") %>%
+  pivot_longer(-Area, names_to="Measure", values_to="v")
+p <- ggplot(d, aes(Area, v, fill=Area)) + geom_col(show.legend=FALSE) +
+  facet_wrap(~ Measure, scales="free_y") +
+  labs(title="Fresh milk: rural vs urban", x=NULL, y=NULL)
+gg("milk_05_rural_urban.png", p, 9, 4)
+
+# M6. milk by livestock ownership (quantity per AE, by source)
+d <- milk %>% filter(qty_total>0) %>% mutate(L = ifelse(livestock==1,"Owns livestock","No livestock")) %>%
+  group_by(L) %>% summarise(
+    Purchased = w_mean(qty_pur/adulteq, weight), `Own production` = w_mean(qty_own/adulteq, weight),
+    Gifts = w_mean(qty_gift/adulteq, weight), .groups="drop") %>%
+  pivot_longer(-L, names_to="Source", values_to="v") %>%
+  mutate(Source = factor(Source, levels=c("Purchased","Own production","Gifts")))
+p <- ggplot(d, aes(L, v, fill=Source)) + geom_col() +
+  labs(title="Fresh milk by livestock ownership",
+       subtitle="Owners self-provision (own production); others rely on the market",
+       x=NULL, y="Litres per adult equivalent (7 days)", fill=NULL)
+gg("milk_06_livestock.png", p, 8, 5)
+
+# M7. unit value distribution by quartile (quality spread)
+d <- milk %>% filter(!is.na(q), is.finite(unit_value))
+p <- ggplot(d, aes(q, unit_value)) + geom_boxplot(fill="#56B4E9", outlier.size=0.4) +
+  coord_cartesian(ylim = c(0, quantile(d$unit_value, 0.95, na.rm=TRUE))) +
+  labs(title="Fresh milk: unit value distribution by income quartile",
+       subtitle="The price paid per litre shifts up with income (quality upgrading)",
+       x="Income quartile (poor → rich)", y="Unit value (TSH/litre)")
+gg("milk_07_unitvalue_box.png", p, 8, 5)
+
+# M8. unit value vs income (household scatter + fit)
+d <- reg %>% filter(label == "Fresh milk")
+p <- ggplot(d, aes(lx, unit_value)) + geom_point(alpha=0.12, colour="#56B4E9") +
+  geom_smooth(method="lm", colour="#D55E00", se=TRUE) +
+  coord_cartesian(ylim = c(0, quantile(d$unit_value, 0.97, na.rm=TRUE))) +
+  labs(title="Fresh milk: unit value rises with income",
+       subtitle="Each point is a household; the line is the fitted quality gradient",
+       x="log(real expenditure per adult equivalent)", y="Unit value (TSH/litre)")
+gg("milk_08_unitvalue_vs_income.png", p, 8, 5)
+
 cat("Done: results.xlsx (9 sheets) and figures in /figures\n")

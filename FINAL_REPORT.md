@@ -54,7 +54,7 @@ effects.
 | Fresh milk | 25.9 | 1.09 L | 1,065 | 1,000 /litre |
 
 Across welfare quartiles, quantity, expenditure and unit value all rise with
-income (`output/tables/03_group_means.csv`, figures 08, 09, 10).
+income (figures 08, 09, 10).
 
 ## 4. Elasticity decomposition (main result)
 

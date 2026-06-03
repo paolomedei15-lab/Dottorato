@@ -536,4 +536,22 @@ p <- ggplot(d, aes(lx, unit_value)) + geom_point(alpha=0.12, colour="#56B4E9") +
        x="log(real expenditure per adult equivalent)", y="Unit value (TSH/litre)")
 gg("milk_08_unitvalue_vs_income.png", p, 8, 5)
 
+# M9. participation by income quartile — TOTAL (not split by area)
+d <- milk %>% filter(!is.na(q)) %>% group_by(Q=q) %>%
+  summarise(p = 100*w_mean(as.numeric(qty_total>0), weight), .groups="drop")
+p <- ggplot(d, aes(Q, p, group=1)) + geom_line(colour="#56B4E9", linewidth=1.1) +
+  geom_point(colour="#56B4E9", size=3) +
+  labs(title="Fresh milk — share of consumers by income quartile (total)",
+       x="Income quartile (poor → rich)", y="% of households consuming")
+gg("milk_09_participation_total.png", p, 8, 5)
+
+# M10. expenditure per AE by income quartile — TOTAL
+d <- milk %>% filter(!is.na(q), qty_total>0) %>% group_by(Q=q) %>%
+  summarise(e = w_mean(value_pae, weight), .groups="drop")
+p <- ggplot(d, aes(Q, e, group=1)) + geom_line(colour="#D55E00", linewidth=1.1) +
+  geom_point(colour="#D55E00", size=3) +
+  labs(title="Fresh milk — expenditure per adult equivalent by income quartile (total)",
+       x="Income quartile (poor → rich)", y="Expenditure per AE (TSH, 7 days)")
+gg("milk_10_expenditure_total.png", p, 8, 5)
+
 cat("Done: results.xlsx (9 sheets) and figures in /figures\n")

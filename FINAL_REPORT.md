@@ -53,7 +53,7 @@ effects.
 | Eggs | 17.1 | 2.08 pcs | 771 | 300 /piece |
 | Fresh milk | 25.9 | 1.09 L | 1,065 | 1,000 /litre |
 
-Across welfare quintiles, quantity, expenditure and unit value all rise with
+Across welfare quartiles, quantity, expenditure and unit value all rise with
 income (`output/tables/03_group_means.csv`, figures `fig2`, `fig8`, `fig9`).
 
 ## 4. Elasticity decomposition (main result)
@@ -77,9 +77,8 @@ is rejected. Quantity accounts for the larger share of the expenditure response.
 
 ## 5. Quality elasticity across the distribution and by subgroup
 
-- **By welfare quintile** (`fig5`): the quality elasticity is positive and
-  significant in all five quintiles (Q1 ≈ 0.061, Q2 ≈ 0.040, Q3 ≈ 0.051,
-  Q4 ≈ 0.062, Q5 ≈ 0.067).
+- **By welfare quartile** (`fig5`): the quality elasticity is positive and
+  significant in all four quartiles.
 - **By subgroup** (`output/tables/05b_…`): quality elasticity ≈ 0.089 rural,
   0.056 urban, 0.085 livestock-owners, 0.088 non-owners.
 - **By wave** (`output/tables/09_…`): ε_quality ≈ 0.086 (Y3), 0.089 (Y4),

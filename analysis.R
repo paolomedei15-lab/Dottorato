@@ -427,6 +427,24 @@ p <- ggplot(reg, aes(lx, log(unit_value), colour=label)) +
        x="log(real expenditure per adult equivalent)", y="log(unit value)", colour=NULL)
 gg("14_quality_gradient.png", p)
 
+## (extra) how consumption changes with income — share of consumers by quartile
+p <- byq %>% ord() %>%
+  ggplot(aes(Q, `% consuming`, colour=Item, group=Item)) +
+  geom_line(linewidth=1) + geom_point(size=2) + scale_colour_manual(values=pal) +
+  labs(title="Share of consumers by income quartile",
+       subtitle="% of households consuming each product, poorest → richest",
+       x="Income quartile (poor → rich)", y="% of households consuming", colour=NULL)
+gg("15_share_consumers_by_quartile.png", p)
+
+## (extra) expenditure per adult equivalent by quartile (levels, TSH)
+p <- byq %>% filter(N_cons>=30) %>% ord() %>%
+  ggplot(aes(Q, `Value/AE (TSH)`, colour=Item, group=Item)) +
+  geom_line(linewidth=1) + geom_point(size=2) + scale_colour_manual(values=pal) +
+  labs(title="Expenditure per adult equivalent by income quartile",
+       subtitle="Value of consumption (TSH, past 7 days) among consumers",
+       x="Income quartile (poor → rich)", y="Expenditure per AE (TSH)", colour=NULL)
+gg("16_expenditure_by_quartile_levels.png", p)
+
 
 ## ===========================================================================
 ## 8. FRESH MILK — focus figures (milk only)

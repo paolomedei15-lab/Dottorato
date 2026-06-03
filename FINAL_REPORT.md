@@ -54,7 +54,7 @@ effects.
 | Fresh milk | 25.9 | 1.09 L | 1,065 | 1,000 /litre |
 
 Across welfare quartiles, quantity, expenditure and unit value all rise with
-income (`output/tables/03_group_means.csv`, figures `fig2`, `fig8`, `fig9`).
+income (`output/tables/03_group_means.csv`, figures `fig07`, `fig08`, `fig09`).
 
 ## 4. Elasticity decomposition (main result)
 
@@ -77,14 +77,12 @@ is rejected. Quantity accounts for the larger share of the expenditure response.
 
 ## 5. Quality elasticity across the distribution and by subgroup
 
-- **By welfare quartile** (`fig5`): the quality elasticity is positive and
-  significant in all four quartiles.
-- **By subgroup** (`output/tables/05b_…`): quality elasticity ≈ 0.089 rural,
-  0.056 urban, 0.085 livestock-owners, 0.088 non-owners.
-- **By wave** (`output/tables/09_…`): ε_quality ≈ 0.086 (Y3), 0.089 (Y4),
-  0.065 (Y5) — consistent across waves.
+- **By welfare quartile** (`08_quality_by_quartile.csv`): the quality elasticity
+  is positive and significant in all four quartiles.
+- **By subgroup** (`07b_elasticities_by_subgroup.csv`): quality elasticity
+  ≈ 0.089 rural, 0.056 urban, 0.085 livestock-owners, 0.088 non-owners.
 
-### Heterogeneity tests (`output/tables/12_heterogeneity_tests.csv`)
+### Heterogeneity tests (`output/tables/10_heterogeneity_tests.csv`)
 
 Income is interacted with the group dummy; the interaction coefficient is the
 difference in the quality elasticity.
@@ -97,15 +95,18 @@ difference in the quality elasticity.
 The quality elasticity is positive and significant in all four income
 quartiles, so quality influences purchases across the whole distribution rather
 than starting at a single income threshold; the income level of each quartile
-is in `07_quartile_income_by_wave.csv`.
+is in `09_quartile_income_by_wave.csv`.
 
 ## 6. Outputs
 
-- **Tables** in `output/tables/` (household and item summaries, group means,
-  top/bottom ratios, elasticities and subgroup/by-wave/by-quintile results).
-- **Figures** in `output/figures/` (`fig1`–`fig20`): ratios, unit-value and
-  quantity gradients, elasticity decomposition and 95% CIs, rural/urban and
-  livestock comparisons, source shares, and Engel curves.
+- **Tables** in `output/tables/` (household and item summaries, sources,
+  consumption by wave, group means, basket composition, Q4/Q1 ratios,
+  elasticities, subgroup and quartile results, heterogeneity tests).
+- **Figures** in `output/figures/` (`fig01`–`fig12`), one per outline point:
+  participation, product descriptives, consumption by wave, household
+  composition, urban/rural consumption, sources, consumption and expenditure
+  by quartile, the six-panel quantity/expenditure/unit-value comparison, basket
+  composition, the elasticity decomposition, and the subgroup heterogeneity.
 
 ## 7. Notes and limitations
 

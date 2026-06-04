@@ -77,12 +77,12 @@ is rejected. Quantity accounts for the larger share of the expenditure response.
 
 ## 5. Quality elasticity across the distribution and by subgroup
 
-- **By welfare quartile** (figure 15): the quality elasticity is positive and
+- **By welfare quartile** (`09_quality_elasticity_by_quartile.csv`): positive and
   significant in all four income quartiles.
-- **By subgroup** (figure 15): quality elasticity
+- **By subgroup** (`08_elasticities_by_subgroup.csv`): quality elasticity
   ≈ 0.089 rural, 0.056 urban, 0.085 livestock-owners, 0.088 non-owners.
 
-### Heterogeneity tests (figure 15)
+### Heterogeneity tests (`10_heterogeneity_tests.csv`, figure 12)
 
 Income is interacted with the group dummy; the interaction coefficient is the
 difference in the quality elasticity.
@@ -95,19 +95,22 @@ difference in the quality elasticity.
 The quality elasticity is positive and significant in all four income
 quartiles, so quality influences purchases across the whole distribution rather
 than starting at a single income threshold; the income level of each quartile
-is in `02_consumption_by_wave.csv` / `01_sample_descriptives.csv`.
+is in `01_sample_descriptives.csv`.
 
 ## 6. Outputs
 
-Outputs follow the 15-point outline.
+Outputs are produced in a logical order.
 - **Tables** (`output/tables/`): `01_sample_descriptives`,
-  `01b_consumption_expenditure_by_product`, `02_consumption_by_wave`,
-  `12_inequality_ratios_Q4_Q1`, `13_elasticities`.
-- **Figures** (`output/figures/`): `03`–`15` (share of consumers, product
-  descriptives, consumption trends across waves, household composition by wave,
-  urban/rural consumption, sources, consumption and expenditure by quartile,
-  the six-panel quantity/expenditure/unit-value comparison, basket composition,
-  the quality effect, and the heterogeneity hypothesis test).
+  `02_consumption_expenditure_by_product`, `03_consumption_by_wave`,
+  `04_sources_shares`, `05_group_means_by_quartile`,
+  `06_inequality_ratios_Q4_Q1`, `07_elasticities_by_product`,
+  `08_elasticities_by_subgroup` (rural / urban / livestock),
+  `09_quality_elasticity_by_quartile`, `10_heterogeneity_tests`.
+- **Figures** (`output/figures/`): `fig01`–`fig12` — share of consumers,
+  product descriptives, consumption trends across waves, household composition
+  by wave, urban/rural consumption, sources, consumption and expenditure by
+  quartile, the six-panel quantity/expenditure/unit-value comparison, basket
+  composition, the quality effect, and the heterogeneity test.
 
 ## 7. Notes and limitations
 

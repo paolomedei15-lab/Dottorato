@@ -155,6 +155,9 @@ clean_report <- items %>% group_by(item, wave) %>% summarise(
   .groups = "drop")
 write.csv(clean_report, file.path(out_tab, "00_data_cleaning_report.csv"), row.names = FALSE)
 
+## keep the un-trimmed item table (used by the sensitivity analysis below)
+items_raw <- items
+
 items <- items %>%
   group_by(item, wave) %>%
   mutate(across(c(unit_value, qty_total, qty_purch, qty_own, qty_gift, exp), trim_to_na)) %>%
@@ -292,6 +295,44 @@ quality_by_quartile <- tibble(quartile = str_extract(sr, "Q[1-4]"),
   mutate(p_value = pt(eps_quality / se, df.residual(m_byq), lower.tail = FALSE)) %>%
   arrange(quartile)
 n_q_sig <- sum(quality_by_quartile$p_value < 0.05)
+
+## ---- SENSITIVITY ANALYSIS: robustness to the outlier rule -------------------
+## Re-estimate the elasticities under three cleaning rules applied within each
+## item x wave: trim 1/99 (baseline), trim 2.5/97.5, and winsorize 1/99 (cap at
+## the bounds instead of dropping). If the conclusions are robust, the quality
+## elasticity should stay positive and significant under all three.
+clean_col <- function(x, lo, hi, method) {
+  qs <- quantile(x, c(lo, hi), na.rm = TRUE, names = FALSE)
+  if (method == "trim") ifelse(is.finite(x) & x >= qs[1] & x <= qs[2], x, NA_real_)
+  else pmin(pmax(x, qs[1]), qs[2])            # winsorize
+}
+sens_data <- function(lo, hi, method) items_raw %>% group_by(item, wave) %>%
+  mutate(uv = clean_col(unit_value, lo, hi, method),
+         qp = clean_col(qty_purch,  lo, hi, method),
+         ex = clean_col(exp,        lo, hi, method)) %>% ungroup() %>%
+  filter(qp > 0, ex > 0, is.finite(uv), welfare_pae > 0, adulteq > 0) %>%
+  mutate(ln_exp = log(ex), ln_q = log(qp), ln_uv = log(uv),
+         ln_w = log(welfare_pae), ln_ae = log(adulteq),
+         wave = factor(wave), region = factor(region), item = factor(item),
+         item_label = factor(item_cfg$label[match(item, item_cfg$item)], levels = item_cfg$label))
+schemes <- tibble(label = c("Trim 1/99", "Trim 2.5/97.5", "Winsorize 1/99"),
+                  lo = c(.01, .025, .01), hi = c(.99, .975, .99),
+                  method = c("trim", "trim", "winsor"))
+## pooled elasticities under each scheme
+sens_pooled <- pmap_dfr(schemes, function(label, lo, hi, method) {
+  d <- sens_data(lo, hi, method)
+  e <- rob(lm(ln_exp ~ ln_w + ln_ae + rural + wave + region + item, d))
+  q <- rob(lm(ln_q   ~ ln_w + ln_ae + rural + wave + region + item, d))
+  v <- rob(lm(ln_uv  ~ ln_w + ln_ae + rural + wave + region + item, d))
+  tibble(scheme = label, n = nrow(d), eps_expenditure = e[1], eps_quantity = q[1],
+         eps_quality = v[1], quality_se = v[2], p_value = pt(v[1]/v[2], nrow(d)-1, lower.tail = FALSE))
+})
+## per-item quality elasticity under each scheme (for the figure)
+sens_item <- pmap_dfr(schemes, function(label, lo, hi, method) {
+  sens_data(lo, hi, method) %>% group_by(item_label) %>%
+    group_modify(~ { v <- rob(lm(ln_uv ~ ln_w + ln_ae + rural + wave + region, .x))
+      tibble(eps_quality = v[1], se = v[2]) }) %>% ungroup() %>% mutate(scheme = label)
+})
 
 
 
@@ -487,6 +528,24 @@ g <- subgroup_elast %>% mutate(lo = eps_quality - 1.96*quality_se, hi = eps_qual
        x = "Quality elasticity", y = NULL)
 ggsave(file.path(out_fig, "fig12_heterogeneity.png"), g, width = 9, height = 5, dpi = 150)
 
+## 11 Sensitivity analysis: elasticities under different outlier rules
+write.csv(sens_pooled, file.path(out_tab, "11_sensitivity_elasticities.csv"), row.names = FALSE)
+cat("\n==== Sensitivity: pooled elasticities under different outlier rules ====\n")
+print(as.data.frame(sens_pooled), digits = 3)
 
-cat("\nDone. Tables 01-10 and figures fig01-fig12 in",
+## fig13 Sensitivity: per-item quality elasticity under the three rules (95% CI)
+g <- sens_item %>%
+  ggplot(aes(item_label, eps_quality, colour = scheme)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point(position = position_dodge(0.5), size = 2) +
+  geom_errorbar(aes(ymin = eps_quality - 1.96*se, ymax = eps_quality + 1.96*se),
+                position = position_dodge(0.5), width = 0.3) +
+  labs(title = "Sensitivity of the quality elasticity to the outlier rule",
+       subtitle = "Per-item quality elasticity under trim 1/99, trim 2.5/97.5 and winsorize 1/99 (95% CI)",
+       x = NULL, y = "Quality elasticity", colour = NULL) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+ggsave(file.path(out_fig, "fig13_sensitivity.png"), g, width = 10, height = 5, dpi = 150)
+
+
+cat("\nDone. Tables 01-11 and figures fig01-fig13 in",
     normalizePath(out_tab), "and", normalizePath(out_fig), "\n")

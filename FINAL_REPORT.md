@@ -92,6 +92,21 @@ difference in the quality elasticity.
 - **Livestock owner vs non-owner:** difference ≈ −0.007, p < 0.01 —
   statistically significant but economically negligible.
 
+### Robustness to the outlier rule (`11_sensitivity_elasticities.csv`, figure 13)
+
+The unit-value method is sensitive to extreme values, so the elasticities are
+re-estimated under three cleaning rules (within item × wave). The quality
+elasticity stays positive and highly significant under all three:
+
+| Rule | ε_expenditure | ε_quantity | ε_quality | t |
+|---|---:|---:|---:|---:|
+| Trim 1/99 (baseline) | 0.42 | 0.34 | 0.075 | 12.5 |
+| Trim 2.5/97.5 | 0.35 | 0.28 | 0.064 | 10.4 |
+| Winsorize 1/99 | 0.46 | 0.38 | 0.087 | 16.3 |
+
+Expenditure elasticity exceeds quantity elasticity in every case, so the
+quality-upgrading conclusion does not depend on the outlier rule.
+
 The quality elasticity is positive and significant in all four income
 quartiles, so quality influences purchases across the whole distribution rather
 than starting at a single income threshold; the income level of each quartile
@@ -105,8 +120,9 @@ Outputs are produced in a logical order.
   `04_sources_shares`, `05_group_means_by_quartile`,
   `06_inequality_ratios_Q4_Q1`, `07_elasticities_by_product`,
   `08_elasticities_by_subgroup` (rural / urban / livestock),
-  `09_quality_elasticity_by_quartile`, `10_heterogeneity_tests`.
-- **Figures** (`output/figures/`): `fig01`–`fig12` — share of consumers,
+  `09_quality_elasticity_by_quartile`, `10_heterogeneity_tests`,
+  `11_sensitivity_elasticities`, plus `00_data_cleaning_report`.
+- **Figures** (`output/figures/`): `fig01`–`fig13` (incl. the sensitivity check) — share of consumers,
   product descriptives, consumption trends across waves, household composition
   by wave, urban/rural consumption, sources, consumption and expenditure by
   quartile, the six-panel quantity/expenditure/unit-value comparison, basket

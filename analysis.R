@@ -135,7 +135,27 @@ for (wave in names(wave_cfg)) {
 household <- bind_rows(hh_list)
 
 items <- bind_rows(item_list) %>% left_join(household, by = c("wave", "hhid")) %>%
-  mutate(unit_value = ifelse(qty_purch > 0 & exp > 0, exp / qty_purch, NA_real_)) %>%
+  mutate(unit_value = ifelse(qty_purch > 0 & exp > 0, exp / qty_purch, NA_real_))
+
+## ---- DATA CLEANING / OUTLIER HANDLING --------------------------------------
+## We do NOT keep every row blindly. Survey unit values sometimes contain
+## implausible numbers (e.g. a beef unit value of millions of TSH/kg from a
+## mis-recorded quantity). Within each item x wave we drop the bottom 1% and the
+## top 1% of unit value, quantity and expenditure (trim_to_na): those values are
+## set to NA and so are excluded from descriptives, ratios and regressions.
+## The report below documents, per item x wave, the unit-value range before
+## trimming and how many values are flagged, so the cleaning is transparent.
+clean_report <- items %>% group_by(item, wave) %>% summarise(
+  n_purchasers = sum(is.finite(unit_value)),
+  uv_min    = suppressWarnings(min(unit_value, na.rm = TRUE)),
+  uv_median = median(unit_value, na.rm = TRUE),
+  uv_p99    = quantile(unit_value, 0.99, na.rm = TRUE, names = FALSE),
+  uv_max    = suppressWarnings(max(unit_value, na.rm = TRUE)),
+  n_trimmed_unit_value = sum(is.finite(unit_value) & is.na(trim_to_na(unit_value))),
+  .groups = "drop")
+write.csv(clean_report, file.path(out_tab, "00_data_cleaning_report.csv"), row.names = FALSE)
+
+items <- items %>%
   group_by(item, wave) %>%
   mutate(across(c(unit_value, qty_total, qty_purch, qty_own, qty_gift, exp), trim_to_na)) %>%
   ungroup() %>%

@@ -1,0 +1,42 @@
+name: farmers_wingman
+description: "Farmer's Wingman — early cattle-health detection for farmers and veterinarians."
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State management (locked in Step 0): compile-safe, testable, scalable.
+  flutter_riverpod: ^2.5.1
+
+  # Formatting for dates/numbers shown to farmers & vets.
+  intl: ^0.19.0
+
+  # NOTE: go_router (routing), drift (offline DB), flutter_map (maps) and
+  # supabase_flutter (backend) are added in the steps that first use them,
+  # so `pub get` stays fast and the dependency tree honestly reflects usage.
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Bundled font — the app must render text offline in the field, so we never
+  # rely on a runtime font-CDN download. (Only Regular + Medium are shipped;
+  # heavier weights fall back to Medium.)
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
